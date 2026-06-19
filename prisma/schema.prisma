@@ -24,15 +24,16 @@ model User {
 }
 
 model Article {
-  id         String            @id @default(uuid())
-  title      String
-  author     String            // 作者名称（字符串）
-  createdAt  DateTime          @default(now())
-  importance String            // 'low', 'medium', 'high'
-  views      Int               @default(0)
-  content    String            // 富文本内容（HTML）
-  updatedAt  DateTime          @updatedAt
-  editLock   ArticleEditLock?
+  id               String            @id @default(uuid())
+  title            String
+  author           String
+  createdAt        DateTime          @default(now())
+  importance       String            // 'low', 'medium', 'high'
+  views            Int               @default(0)
+  content          String            // 富文本内容（HTML）
+  contentPlainText String            @default("")  // 纯文本内容，用于FTS5索引
+  updatedAt        DateTime          @updatedAt
+  editLock         ArticleEditLock?
 
   @@index([title])
   @@index([createdAt])

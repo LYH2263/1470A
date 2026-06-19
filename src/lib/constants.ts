@@ -22,4 +22,9 @@ export const PAGINATION = {
 // 搜索配置
 export const SEARCH = {
   MAX_KEYWORD_LENGTH: 100,
+  SNIPPET_LENGTH: 200,
+  HIGHLIGHT_PRE_TAG: '<mark>',
+  HIGHLIGHT_POST_TAG: '</mark>',
+  SUGGESTION_LIMIT: 5,
+  MIN_QUERY_LENGTH: 1,
 } as const;

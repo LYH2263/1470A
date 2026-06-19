@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
+import { stripHtml, tokenizeChinese, searchArticles } from './search';
 import type {
   Article,
   ArticleFormData,
@@ -9,6 +10,7 @@ import type {
   LockOwner,
   LockStatus,
   UpdateArticleWithOptimisticLock,
+  SearchHighlight,
 } from '@/types/article';
 import { LOCK_CONSTANTS } from '@/types/article';
 
@@ -21,6 +23,7 @@ function mapArticleToDTO(article: {
   importance: string;
   views: number;
   content: string;
+  contentPlainText?: string;
   updatedAt: Date;
 }): Article {
   return {
@@ -64,16 +67,33 @@ function mapLockToDTO(lock: {
 export async function getArticles(query: ArticleListQuery): Promise<ArticleListResponse> {
   const { page, pageSize, keyword } = query;
 
-  // 构建查询条件
-  const where = keyword
-    ? {
-        title: {
-          contains: keyword,
-        },
-      }
-    : {};
+  if (keyword && keyword.trim()) {
+    const { data: ftsResults, total } = await searchArticles(keyword.trim(), page, pageSize);
 
-  // 获取总数和分页数据（并行执行）
+    const data: Article[] = ftsResults.map((row) => {
+      const highlight: SearchHighlight = {};
+      if (row.highlightTitle) highlight.title = row.highlightTitle;
+      if (row.highlightAuthor) highlight.author = row.highlightAuthor;
+      if (row.snippet) highlight.snippet = row.snippet;
+
+      return {
+        id: row.id,
+        title: row.title,
+        author: row.author,
+        createdAt: row.createdAt,
+        importance: row.importance as 'low' | 'medium' | 'high',
+        views: row.views,
+        content: row.content,
+        updatedAt: row.updatedAt,
+        ...(Object.keys(highlight).length > 0 ? { highlight } : {}),
+      };
+    });
+
+    return { data, total, page, pageSize };
+  }
+
+  const where = {};
+
   const [total, articles] = await Promise.all([
     prisma.article.count({ where }),
     prisma.article.findMany({
@@ -86,7 +106,6 @@ export async function getArticles(query: ArticleListQuery): Promise<ArticleListR
     }),
   ]);
 
-  // 转换数据格式
   const data = articles.map(mapArticleToDTO);
 
   return {
@@ -112,6 +131,9 @@ export async function getArticleById(id: string): Promise<Article | null> {
 
 // 创建文章
 export async function createArticle(data: ArticleFormData): Promise<Article> {
+  const plainText = stripHtml(data.content);
+  const tokenized = tokenizeChinese(plainText);
+
   const article = await prisma.article.create({
     data: {
       title: data.title,
@@ -119,6 +141,7 @@ export async function createArticle(data: ArticleFormData): Promise<Article> {
       createdAt: new Date(data.createdAt),
       importance: data.importance,
       content: data.content,
+      contentPlainText: tokenized,
       views: 0,
     },
   });
@@ -129,6 +152,9 @@ export async function createArticle(data: ArticleFormData): Promise<Article> {
 // 更新文章
 export async function updateArticle(id: string, data: ArticleFormData): Promise<Article | null> {
   try {
+    const plainText = stripHtml(data.content);
+    const tokenized = tokenizeChinese(plainText);
+
     const article = await prisma.article.update({
       where: { id },
       data: {
@@ -137,6 +163,7 @@ export async function updateArticle(id: string, data: ArticleFormData): Promise<
         createdAt: new Date(data.createdAt),
         importance: data.importance,
         content: data.content,
+        contentPlainText: tokenized,
       },
     });
 
@@ -535,6 +562,7 @@ export async function updateArticleWithOptimisticLock(
           createdAt: new Date(data.createdAt),
           importance: data.importance,
           content: data.content,
+          contentPlainText: tokenizeChinese(stripHtml(data.content)),
         },
       });
 

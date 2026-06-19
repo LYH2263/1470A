@@ -23,6 +23,17 @@ import {
 } from '@/test/factories';
 import type { ArticleEditLock, LockOwner } from '@/types/article';
 
+vi.mock('@/lib/search', () => ({
+  searchArticles: vi.fn(),
+  getSearchSuggestions: vi.fn(),
+  rebuildFtsIndex: vi.fn(),
+  updateFtsForArticle: vi.fn(),
+  stripHtml: vi.fn((html: string) => html.replace(/<[^>]*>/g, '')),
+  tokenizeChinese: vi.fn((text: string) => text),
+}));
+
+import { searchArticles } from '@/lib/search';
+
 // Mock Prisma Client
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -51,6 +62,14 @@ vi.mock('@/lib/prisma', () => ({
 
 import { prisma } from '@/lib/prisma';
 
+function toPrismaArticle(article: ReturnType<typeof createMockArticle>) {
+  return {
+    ...article,
+    createdAt: new Date(article.createdAt),
+    updatedAt: new Date(article.updatedAt),
+  };
+}
+
 describe('Storage Layer - 数据正确性测试', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,10 +78,7 @@ describe('Storage Layer - 数据正确性测试', () => {
   describe('getArticles - 列表查询', () => {
     it('应该返回正确的分页数据结构', async () => {
       const mockArticles = createMockArticles(5);
-      const mockPrismaArticles = mockArticles.map((article) => ({
-        ...article,
-        createdAt: new Date(article.createdAt),
-      }));
+      const mockPrismaArticles = mockArticles.map(toPrismaArticle);
 
       vi.mocked(prisma.article.count).mockResolvedValue(50);
       vi.mocked(prisma.article.findMany).mockResolvedValue(mockPrismaArticles);
@@ -81,10 +97,7 @@ describe('Storage Layer - 数据正确性测试', () => {
 
     it('应该正确转换日期格式', async () => {
       const mockArticle = createMockArticle();
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.count).mockResolvedValue(1);
       vi.mocked(prisma.article.findMany).mockResolvedValue([mockPrismaArticle]);
@@ -95,22 +108,36 @@ describe('Storage Layer - 数据正确性测试', () => {
       expect(typeof result.data[0].createdAt).toBe('string');
     });
 
-    it('应该正确处理搜索关键词', async () => {
+    it('应该正确处理搜索关键词（使用FTS5）', async () => {
       const keyword = '测试';
-      vi.mocked(prisma.article.count).mockResolvedValue(0);
-      vi.mocked(prisma.article.findMany).mockResolvedValue([]);
+      const mockFtsResult = {
+        id: 'test-id',
+        title: '测试文章',
+        author: '测试作者',
+        createdAt: new Date().toISOString(),
+        importance: 'medium',
+        views: 0,
+        content: '<p>测试内容</p>',
+        contentPlainText: '测试内容',
+        updatedAt: new Date().toISOString(),
+        rank: -1,
+        highlightTitle: '<mark>测试</mark>文章',
+        highlightAuthor: null,
+        snippet: '<mark>测试</mark>内容',
+      };
 
-      await getArticles({ page: 1, pageSize: 10, keyword });
+      vi.mocked(searchArticles).mockResolvedValue({
+        data: [mockFtsResult],
+        total: 1,
+      });
 
-      expect(prisma.article.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            title: {
-              contains: keyword,
-            },
-          },
-        })
-      );
+      const result = await getArticles({ page: 1, pageSize: 10, keyword });
+
+      expect(searchArticles).toHaveBeenCalledWith(keyword, 1, 10);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].highlight).toBeDefined();
+      expect(result.data[0].highlight?.title).toBe('<mark>测试</mark>文章');
+      expect(result.data[0].highlight?.snippet).toBe('<mark>测试</mark>内容');
     });
 
     it('应该正确计算分页偏移量', async () => {
@@ -170,11 +197,7 @@ describe('Storage Layer - 数据正确性测试', () => {
   describe('getArticleById - 单条查询', () => {
     it('应该返回正确的文章数据', async () => {
       const mockArticle = createMockArticle();
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-        updatedAt: new Date(mockArticle.updatedAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.findUnique).mockResolvedValue(mockPrismaArticle);
 
@@ -192,10 +215,7 @@ describe('Storage Layer - 数据正确性测试', () => {
 
     it('应该正确转换日期格式', async () => {
       const mockArticle = createMockArticle();
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.findUnique).mockResolvedValue(mockPrismaArticle);
 
@@ -229,10 +249,7 @@ describe('Storage Layer - 数据正确性测试', () => {
     it('应该创建文章并返回正确的数据', async () => {
       const formData = createMockArticleFormData();
       const mockArticle = createMockArticle(formData);
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.create).mockResolvedValue(mockPrismaArticle);
 
@@ -248,10 +265,7 @@ describe('Storage Layer - 数据正确性测试', () => {
     it('应该正确转换日期格式', async () => {
       const formData = createMockArticleFormData();
       const mockArticle = createMockArticle(formData);
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.create).mockResolvedValue(mockPrismaArticle);
 
@@ -263,10 +277,7 @@ describe('Storage Layer - 数据正确性测试', () => {
     it('应该初始化阅读数为 0', async () => {
       const formData = createMockArticleFormData();
       const mockArticle = createMockArticle({ ...formData, views: 0 });
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.create).mockResolvedValue(mockPrismaArticle);
 
@@ -290,10 +301,7 @@ describe('Storage Layer - 数据正确性测试', () => {
       });
 
       const mockArticle = createMockArticle(formData);
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.create).mockResolvedValue(mockPrismaArticle);
 
@@ -306,6 +314,7 @@ describe('Storage Layer - 数据正确性测试', () => {
           createdAt: expect.any(Date),
           importance: formData.importance,
           content: formData.content,
+          contentPlainText: expect.any(String),
           views: 0,
         },
       });
@@ -319,10 +328,7 @@ describe('Storage Layer - 数据正确性测试', () => {
         title: '更新后的标题',
       });
       const mockArticle = createMockArticle({ id, ...formData });
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.update).mockResolvedValue(mockPrismaArticle);
 
@@ -366,10 +372,7 @@ describe('Storage Layer - 数据正确性测试', () => {
       });
 
       const mockArticle = createMockArticle({ id, ...formData });
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.update).mockResolvedValue(mockPrismaArticle);
 
@@ -383,6 +386,7 @@ describe('Storage Layer - 数据正确性测试', () => {
           createdAt: expect.any(Date),
           importance: formData.importance,
           content: formData.content,
+          contentPlainText: expect.any(String),
         },
       });
     });
@@ -446,10 +450,7 @@ describe('Storage Layer - 数据正确性测试', () => {
     it('创建的文章应该包含所有必需字段', async () => {
       const formData = createMockArticleFormData();
       const mockArticle = createMockArticle(formData);
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.create).mockResolvedValue(mockPrismaArticle);
 
@@ -466,11 +467,7 @@ describe('Storage Layer - 数据正确性测试', () => {
 
     it('查询的文章应该保持数据类型正确', async () => {
       const mockArticle = createMockArticle();
-      const mockPrismaArticle = {
-        ...mockArticle,
-        createdAt: new Date(mockArticle.createdAt),
-        updatedAt: new Date(mockArticle.updatedAt),
-      };
+      const mockPrismaArticle = toPrismaArticle(mockArticle);
 
       vi.mocked(prisma.article.findUnique).mockResolvedValue(mockPrismaArticle);
 

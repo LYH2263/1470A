@@ -1,14 +1,22 @@
 // 文章数据类型定义
 
 export interface Article {
-  id: string;                                    // 唯一标识符（UUID）
-  title: string;                                 // 标题（必填）
-  author: string;                                // 作者名称（必填）
-  createdAt: string;                             // 创建时间（ISO 8601 格式）
-  importance: 'low' | 'medium' | 'high';         // 重要性等级
-  views: number;                                 // 阅读数
-  content: string;                               // 富文本内容（HTML）
-  updatedAt: string;                             // 更新时间（用于乐观锁）
+  id: string;
+  title: string;
+  author: string;
+  createdAt: string;
+  importance: 'low' | 'medium' | 'high';
+  views: number;
+  content: string;
+  contentPlainText?: string;
+  updatedAt: string;
+  highlight?: SearchHighlight;
+}
+
+export interface SearchHighlight {
+  title?: string;
+  author?: string;
+  snippet?: string;
 }
 
 export interface ArticleFormData {
@@ -110,6 +118,28 @@ export interface StealLockResponse {
 
 export interface UpdateArticleWithOptimisticLock extends ArticleFormData {
   lastUpdatedAt: string;
+}
+
+export interface SearchSuggestion {
+  id: string;
+  title: string;
+  author: string;
+}
+
+export interface FtsSearchResult {
+  id: string;
+  title: string;
+  author: string;
+  createdAt: string;
+  importance: string;
+  views: number;
+  content: string;
+  contentPlainText: string;
+  updatedAt: string;
+  rank: number;
+  highlightTitle: string | null;
+  highlightAuthor: string | null;
+  snippet: string | null;
 }
 
 export const LOCK_CONSTANTS = {
