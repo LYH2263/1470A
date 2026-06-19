@@ -3,6 +3,9 @@ import { getArticleById, updateArticle, deleteArticles, updateArticleWithOptimis
 import { ArticleSchema } from '@/lib/validation';
 import type { ApiResponse, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { withAuth, type AuthenticatedRequest } from '@/lib/middleware';
+import { getGlobalDetector } from '@/lib/sensitive-word-detector';
+import { getAllEnabledSensitiveWords } from '@/lib/sensitive-word-storage';
+import type { SensitiveWordDetectionResult } from '@/types/sensitive-word';
 
 async function handler(
   req: AuthenticatedRequest,
@@ -54,7 +57,7 @@ async function handler(
     try {
       const body = req.body as UpdateArticleWithOptimisticLock;
 
-      // 数据验证
+      // 1. 数据验证 (validation.ts)
       const validationResult = ArticleSchema.safeParse(body);
       if (!validationResult.success) {
         return res.status(400).json({
@@ -63,9 +66,76 @@ async function handler(
         });
       }
 
-      // 如果提供了 lastUpdatedAt，则使用乐观锁
+      // 2. 敏感词检测
+      let detector = getGlobalDetector();
+      if (detector.getWords().length === 0) {
+        const words = await getAllEnabledSensitiveWords();
+        detector = getGlobalDetector(words);
+      }
+
+      const titleDetection = detector.detect(validationResult.data.title);
+      const contentDetection = detector.detect(validationResult.data.content);
+
+      const allMatches = [...titleDetection.matches, ...contentDetection.matches];
+      const detectionResult: SensitiveWordDetectionResult = {
+        matches: allMatches,
+        shouldBlock: titleDetection.shouldBlock || contentDetection.shouldBlock,
+        blockReason: titleDetection.blockReason || contentDetection.blockReason,
+        replacedContent: contentDetection.replacedContent,
+        originalContent: validationResult.data.content,
+        stats: {
+          totalMatches: titleDetection.stats.totalMatches + contentDetection.stats.totalMatches,
+          highLevelCount: titleDetection.stats.highLevelCount + contentDetection.stats.highLevelCount,
+          mediumLevelCount: titleDetection.stats.mediumLevelCount + contentDetection.stats.mediumLevelCount,
+          lowLevelCount: titleDetection.stats.lowLevelCount + contentDetection.stats.lowLevelCount,
+        },
+      };
+
+      // 3. 阻断策略：有 block 级别的敏感词则阻止发布
+      if (detectionResult.shouldBlock) {
+        return res.status(400).json({
+          success: false,
+          error: detectionResult.blockReason || '内容包含违规敏感词，禁止发布',
+          data: {
+            sensitiveWordDetection: detectionResult,
+          },
+        });
+      }
+
+      // 4. 替换策略：将 replace 级别的敏感词替换为 ***
+      let finalData = { ...validationResult.data };
+      if (contentDetection.matches.some(m => m.strategy === 'replace') || 
+          titleDetection.matches.some(m => m.strategy === 'replace')) {
+        const replaceMatch = (text: string, matches: typeof contentDetection.matches) => {
+          const replaceable = matches.filter(m => m.strategy === 'replace');
+          if (replaceable.length === 0) return text;
+          
+          let result = '';
+          let lastIndex = 0;
+          const sorted = [...replaceable].sort((a, b) => a.start - b.start);
+          
+          for (const match of sorted) {
+            if (match.start >= lastIndex) {
+              result += text.slice(lastIndex, match.start);
+              result += '*'.repeat(match.end - match.start);
+              lastIndex = match.end;
+            }
+          }
+          result += text.slice(lastIndex);
+          return result;
+        };
+        
+        finalData.content = replaceMatch(validationResult.data.content, contentDetection.matches);
+        finalData.title = replaceMatch(validationResult.data.title, titleDetection.matches);
+      }
+
+      // 5. 保存文章
       if (body.lastUpdatedAt) {
-        const result = await updateArticleWithOptimisticLock(id, body);
+        const updateBody = {
+          ...body,
+          ...finalData,
+        };
+        const result = await updateArticleWithOptimisticLock(id, updateBody);
 
         if (result.conflict) {
           return res.status(409).json({
@@ -88,11 +158,14 @@ async function handler(
         return res.status(200).json({
           success: true,
           data: result.article,
+          message: detectionResult.stats.totalMatches > 0 
+            ? `检测到 ${detectionResult.stats.totalMatches} 个敏感词，${detectionResult.stats.mediumLevelCount} 个已自动替换` 
+            : undefined,
+          sensitiveWordDetection: detectionResult,
         });
       }
 
-      // 向后兼容：没有 lastUpdatedAt 时使用原有的更新方式
-      const article = await updateArticle(id, validationResult.data);
+      const article = await updateArticle(id, finalData);
 
       if (!article) {
         return res.status(404).json({
@@ -104,6 +177,10 @@ async function handler(
       return res.status(200).json({
         success: true,
         data: article,
+        message: detectionResult.stats.totalMatches > 0 
+          ? `检测到 ${detectionResult.stats.totalMatches} 个敏感词，${detectionResult.stats.mediumLevelCount} 个已自动替换` 
+          : undefined,
+        sensitiveWordDetection: detectionResult,
       });
     } catch (error) {
       console.error('更新文章失败:', error);

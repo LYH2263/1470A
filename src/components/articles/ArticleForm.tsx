@@ -1,10 +1,13 @@
-import { Form, Input, Select, DatePicker, message, Modal } from 'antd';
+import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Badge, Button } from 'antd';
 import { useRouter } from 'next/router';
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
+import { WarningOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import type { Article, ArticleFormData, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { fetchWithAuth } from '@/lib/api';
+import { detectSensitiveWords, getLevelColor, getLevelLabel, getCategoryLabel, getStrategyLabel } from '@/lib/api-sensitive-word';
+import type { SensitiveWordDetectionResult, SensitiveWordMatch } from '@/types/sensitive-word';
 
 interface ArticleFormProps {
   initialValues?: Article;
@@ -27,6 +30,14 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
   const [form] = Form.useForm<ArticleFormValues>();
   const [submitting, setSubmitting] = useState(false);
 
+  const [detectionResult, setDetectionResult] = useState<SensitiveWordDetectionResult | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [showMatchList, setShowMatchList] = useState(false);
+
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const contentRef = useRef<string>('');
+  const titleRef = useRef<string>('');
+
   const showConflictModal = (currentArticle: Article) => {
     Modal.confirm({
       title: '版本冲突',
@@ -39,6 +50,131 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
         router.reload();
       },
     });
+  };
+
+  const performDetection = useCallback(async () => {
+    if (readOnly) return;
+    
+    const content = contentRef.current;
+    const title = titleRef.current;
+    
+    if (!content && !title) {
+      setDetectionResult(null);
+      return;
+    }
+
+    try {
+      setIsDetecting(true);
+      const result = await detectSensitiveWords({
+        content: content || '',
+        checkTitle: true,
+        title: title || '',
+      });
+      setDetectionResult(result);
+    } catch (error) {
+      console.error('敏感词检测失败:', error);
+    } finally {
+      setIsDetecting(false);
+    }
+  }, [readOnly]);
+
+  const debouncedDetection = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      performDetection();
+    }, 500);
+  }, [performDetection]);
+
+  const handleContentChange = useCallback((value: string) => {
+    contentRef.current = value;
+    debouncedDetection();
+  }, [debouncedDetection]);
+
+  const handleTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    titleRef.current = e.target.value;
+    debouncedDetection();
+  }, [debouncedDetection]);
+
+  useEffect(() => {
+    if (initialValues) {
+      contentRef.current = initialValues.content || '';
+      titleRef.current = initialValues.title || '';
+      performDetection();
+    }
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [initialValues, performDetection]);
+
+  const renderDetectionAlert = () => {
+    if (!detectionResult || detectionResult.stats.totalMatches === 0) {
+      if (detectionResult) {
+        return (
+          <Alert
+            icon={<CheckCircleOutlined />}
+            message="内容安全检测通过"
+            type="success"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+        );
+      }
+      return null;
+    }
+
+    const { stats, shouldBlock } = detectionResult;
+    const alertType = shouldBlock ? 'error' : stats.highLevelCount > 0 ? 'error' : stats.mediumLevelCount > 0 ? 'warning' : 'info';
+
+    const alertMessage = shouldBlock
+      ? `内容包含 ${stats.totalMatches} 个敏感词，其中 ${stats.highLevelCount} 个为高危，禁止发布`
+      : `检测到 ${stats.totalMatches} 个敏感词：高危 ${stats.highLevelCount} 个，中危 ${stats.mediumLevelCount} 个，低危 ${stats.lowLevelCount} 个`;
+
+    return (
+      <Alert
+        icon={<WarningOutlined />}
+        message={alertMessage}
+        type={alertType as any}
+        showIcon
+        closable
+        style={{ marginBottom: '16px' }}
+        action={
+          <Button size="small" type={shouldBlock ? 'primary' : 'default'} onClick={() => setShowMatchList(!showMatchList)}>
+            {showMatchList ? '隐藏详情' : '查看详情'}
+          </Button>
+        }
+      />
+    );
+  };
+
+  const renderMatchList = () => {
+    if (!showMatchList || !detectionResult || detectionResult.matches.length === 0) {
+      return null;
+    }
+
+    return (
+      <div style={{ marginBottom: '16px', padding: '12px', background: '#fafafa', borderRadius: '4px' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>敏感词命中详情：</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {detectionResult.matches.map((match, index) => (
+            <Tag
+              key={index}
+              color={getLevelColor(match.level)}
+              style={{ padding: '4px 8px' }}
+            >
+              <span style={{ fontWeight: 'bold' }}>{match.originalText}</span>
+              <span style={{ marginLeft: '8px', fontSize: '12px', opacity: 0.8 }}>
+                [{getLevelLabel(match.level)}] [{getCategoryLabel(match.category)}] [{getStrategyLabel(match.strategy)}]
+                {(match as any).inTitle ? ' [标题]' : ''}
+              </span>
+            </Tag>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   const onFinish = async (values: ArticleFormValues) => {
@@ -117,6 +253,9 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
       }
       disabled={readOnly}
     >
+      {renderDetectionAlert()}
+      {renderMatchList()}
+
       <Form.Item
         label="标题"
         name="title"
@@ -125,7 +264,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
           { max: 200, message: '标题不能超过200个字符' },
         ]}
       >
-        <Input placeholder="请输入文章标题" />
+        <Input placeholder="请输入文章标题" onChange={handleTitleChange} />
       </Form.Item>
 
       <Form.Item
@@ -166,7 +305,11 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
         name="content"
         rules={[{ required: true, message: '请输入内容' }]}
       >
-        <RichTextEditor placeholder="请输入文章内容" readOnly={readOnly} />
+        <RichTextEditor 
+          placeholder="请输入文章内容" 
+          readOnly={readOnly} 
+          onChange={handleContentChange}
+        />
       </Form.Item>
     </Form>
   );

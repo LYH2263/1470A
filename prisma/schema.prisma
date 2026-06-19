@@ -57,3 +57,20 @@ model ArticleEditLock {
   @@index([userId])
   @@index([expiresAt])
 }
+
+model SensitiveWord {
+  id         String   @id @default(uuid())
+  word       String   // 敏感词
+  category   String   // 分类：politics, violence, pornography, advertisement, other
+  level      String   // 级别：high(阻断发布), medium(强制替换), low(仅警告)
+  strategy   String   // 策略：block, replace, warn
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([word])
+  @@index([category])
+  @@index([level])
+  @@index([enabled])
+  @@unique([word])
+}
