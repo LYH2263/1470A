@@ -20,6 +20,7 @@ interface RichTextEditorProps {
   onChange?: (value: string) => void;
   placeholder?: string;
   readOnly?: boolean;
+  height?: number;
 }
 
 interface PendingImage {
@@ -33,6 +34,7 @@ export default function RichTextEditor({
   onChange,
   placeholder,
   readOnly = false,
+  height,
 }: RichTextEditorProps) {
   const [mounted, setMounted] = useState(false);
   const [quillInstance, setQuillInstance] = useState<any>(null);
@@ -412,11 +414,13 @@ export default function RichTextEditor({
     },
   ];
 
+  const editorHeight = height ?? EDITOR_CONFIG.HEIGHT;
+
   if (!mounted) {
     return (
       <div
         style={{
-          height: `${EDITOR_CONFIG.HEIGHT}px`,
+          height: `${editorHeight}px`,
           marginBottom: `${EDITOR_CONFIG.MARGIN_BOTTOM}px`,
           border: '1px solid #d9d9d9',
           borderRadius: '2px',
@@ -457,7 +461,7 @@ export default function RichTextEditor({
         placeholder={placeholder}
         readOnly={readOnly}
         style={{
-          height: `${EDITOR_CONFIG.HEIGHT}px`,
+          height: `${editorHeight}px`,
           marginBottom: `${EDITOR_CONFIG.MARGIN_BOTTOM}px`,
         }}
       />

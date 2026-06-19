@@ -1,5 +1,12 @@
 import { Layout, Menu } from 'antd';
-import { FileTextOutlined, DashboardOutlined, SafetyOutlined, CloudServerOutlined } from '@ant-design/icons';
+import {
+  FileTextOutlined,
+  DashboardOutlined,
+  SafetyOutlined,
+  CloudServerOutlined,
+  NotificationOutlined,
+  ToolOutlined,
+} from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import type { MenuProps } from 'antd';
 
@@ -29,6 +36,16 @@ export default function Sidebar() {
       key: '/backup',
       icon: <CloudServerOutlined />,
       label: '备份恢复',
+    },
+    {
+      key: '/announcements',
+      icon: <NotificationOutlined />,
+      label: '公告管理',
+    },
+    {
+      key: '/maintenance-settings',
+      icon: <ToolOutlined />,
+      label: '维护模式',
     },
   ];
 

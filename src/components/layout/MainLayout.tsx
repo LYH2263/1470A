@@ -1,6 +1,7 @@
 import { Layout } from 'antd';
 import TopNav from './TopNav';
 import Sidebar from './Sidebar';
+import AnnouncementBar from '@/components/announcements/AnnouncementBar';
 
 const { Content } = Layout;
 
@@ -11,6 +12,7 @@ interface MainLayoutProps {
 export default function MainLayout({ children }: MainLayoutProps) {
   return (
     <Layout style={{ minHeight: '100vh' }}>
+      <AnnouncementBar />
       <TopNav />
       <Layout>
         <Sidebar />
