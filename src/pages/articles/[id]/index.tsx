@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Card, Descriptions, Button, Spin, Tag, message, Space } from 'antd';
 import { useRouter } from 'next/router';
-import DOMPurify from 'isomorphic-dompurify';
 import MainLayout from '@/components/layout/MainLayout';
 import type { Article } from '@/types/article';
-import { formatDate, importanceMap } from '@/lib/utils';
+import { formatDate, importanceMap, sanitizeRichContent } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api';
 
 export default function ArticleDetailPage() {
@@ -62,8 +61,8 @@ export default function ArticleDetailPage() {
 
   const importanceConfig = importanceMap[article.importance];
 
-  // 使用 DOMPurify 清理 HTML 内容，防止 XSS 攻击
-  const sanitizedContent = DOMPurify.sanitize(article.content);
+  // 使用扩展白名单的 DOMPurify 清理 HTML 内容，支持表格和视频
+  const sanitizedContent = sanitizeRichContent(article.content);
 
   return (
     <MainLayout>

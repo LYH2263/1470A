@@ -9,6 +9,82 @@ export const FILE_UPLOAD = {
 export const EDITOR_CONFIG = {
   HEIGHT: 400,
   MARGIN_BOTTOM: 50,
+  CODE_BLOCK_LANGUAGES: [
+    { value: 'javascript', label: 'JavaScript' },
+    { value: 'typescript', label: 'TypeScript' },
+    { value: 'python', label: 'Python' },
+    { value: 'java', label: 'Java' },
+    { value: 'cpp', label: 'C++' },
+    { value: 'csharp', label: 'C#' },
+    { value: 'go', label: 'Go' },
+    { value: 'rust', label: 'Rust' },
+    { value: 'php', label: 'PHP' },
+    { value: 'ruby', label: 'Ruby' },
+    { value: 'swift', label: 'Swift' },
+    { value: 'kotlin', label: 'Kotlin' },
+    { value: 'html', label: 'HTML' },
+    { value: 'css', label: 'CSS' },
+    { value: 'sql', label: 'SQL' },
+    { value: 'json', label: 'JSON' },
+    { value: 'yaml', label: 'YAML' },
+    { value: 'markdown', label: 'Markdown' },
+    { value: 'bash', label: 'Bash/Shell' },
+  ],
+  UPLOAD_CONCURRENCY: 3,
+  UPLOAD_RETRY_COUNT: 3,
+} as const;
+
+// 视频嵌入白名单域名
+export const VIDEO_EMBED_WHITELIST = [
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+  'bilibili.com',
+  'www.bilibili.com',
+  'player.bilibili.com',
+  'vimeo.com',
+  'www.vimeo.com',
+  'player.vimeo.com',
+  'youku.com',
+  'www.youku.com',
+  'player.youku.com',
+  'iqiyi.com',
+  'www.iqiyi.com',
+  'player.iqiyi.com',
+  'qq.com',
+  'v.qq.com',
+  'dailymotion.com',
+  'www.dailymotion.com',
+  'dai.ly',
+] as const;
+
+// 工具栏默认配置
+export const DEFAULT_TOOLBAR_CONFIG: any[] = [
+  [{ header: [1, 2, 3, 4, 5, 6, false] }],
+  ['bold', 'italic', 'underline', 'strike'],
+  [{ list: 'ordered' }, { list: 'bullet' }],
+  [{ color: [] }, { background: [] }],
+  [{ align: [] }],
+  ['code-block', 'code'],
+  ['link', 'image', 'video'],
+  ['table'],
+  ['clean'],
+];
+
+// DOMPurify 白名单扩展配置
+export const DOMPURIFY_ADDONS = {
+  ALLOWED_TAGS: [
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'col', 'colgroup',
+    'caption', 'video', 'source', 'iframe', 'pre', 'code', 'span', 'div',
+  ],
+  ALLOWED_ATTR: [
+    'class', 'style', 'src', 'href', 'target', 'rel', 'width', 'height',
+    'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'align',
+    'frameborder', 'allow', 'allowfullscreen', 'controls', 'autoplay',
+    'loop', 'muted', 'poster', 'type', 'data-language',
+  ],
+  ALLOW_DATA_ATTR: true,
 } as const;
 
 // 分页配置
