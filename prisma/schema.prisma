@@ -1,0 +1,38 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String   // bcrypt加密后的密码
+  name      String   // 显示名称
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([username])
+}
+
+model Article {
+  id         String   @id @default(uuid())
+  title      String
+  author     String   // 作者名称（字符串）
+  createdAt  DateTime @default(now())
+  importance String   // 'low', 'medium', 'high'
+  views      Int      @default(0)
+  content    String   // 富文本内容（HTML）
+  updatedAt  DateTime @updatedAt
+
+  @@index([title])
+  @@index([createdAt])
+  @@index([author])
+}
