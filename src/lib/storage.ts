@@ -34,6 +34,7 @@ function mapArticleToDTO(article: {
   views: number;
   content: string;
   contentPlainText?: string;
+  status: string;
   updatedAt: Date;
   categoryId: string | null;
   category?: {
@@ -49,6 +50,7 @@ function mapArticleToDTO(article: {
     importance: article.importance as 'low' | 'medium' | 'high',
     views: article.views,
     content: article.content,
+    status: article.status as 'draft' | 'published',
     updatedAt: article.updatedAt.toISOString(),
     categoryId: article.categoryId,
     category: article.category || null,
@@ -82,10 +84,10 @@ function mapLockToDTO(lock: {
 
 // 获取文章列表（支持分页和搜索）
 export async function getArticles(query: ArticleListQuery): Promise<ArticleListResponse> {
-  const { page, pageSize, keyword, categoryId } = query;
+  const { page, pageSize, keyword, categoryId, status = 'published' } = query;
 
   if (keyword && keyword.trim()) {
-    const { data: ftsResults, total } = await searchArticles(keyword.trim(), page, pageSize, categoryId);
+    const { data: ftsResults, total } = await searchArticles(keyword.trim(), page, pageSize, categoryId, status);
 
     const data: Article[] = ftsResults.map((row) => {
       const highlight: SearchHighlight = {};
@@ -101,6 +103,7 @@ export async function getArticles(query: ArticleListQuery): Promise<ArticleListR
         importance: row.importance as 'low' | 'medium' | 'high',
         views: row.views,
         content: row.content,
+        status: row.status as 'draft' | 'published',
         updatedAt: row.updatedAt,
         categoryId: (row as any).categoryId || null,
         category: (row as any).category || null,
@@ -116,6 +119,9 @@ export async function getArticles(query: ArticleListQuery): Promise<ArticleListR
     where.categoryId = categoryId;
   } else if (categoryId === null) {
     where.categoryId = null;
+  }
+  if (status !== 'all') {
+    where.status = status;
   }
 
   const [total, articles] = await Promise.all([
@@ -182,6 +188,7 @@ export async function createArticle(data: ArticleFormData): Promise<Article> {
       importance: data.importance,
       content: data.content,
       contentPlainText: tokenized,
+      status: data.status,
       views: 0,
       categoryId: data.categoryId || null,
     },
@@ -213,6 +220,7 @@ export async function updateArticle(id: string, data: ArticleFormData): Promise<
         importance: data.importance,
         content: data.content,
         contentPlainText: tokenized,
+        status: data.status,
         categoryId: data.categoryId || null,
       },
       include: {
@@ -245,15 +253,19 @@ export async function updateArticle(id: string, data: ArticleFormData): Promise<
   }
 }
 
-// 删除文章（支持批量删除）
-export async function deleteArticles(ids: string[]): Promise<number> {
-  const result = await prisma.article.deleteMany({
-    where: {
-      id: {
-        in: ids,
-      },
+// 删除文章（支持批量删除，支持按状态过滤）
+export async function deleteArticles(ids: string[], status?: 'draft' | 'published'): Promise<number> {
+  const where: any = {
+    id: {
+      in: ids,
     },
-  });
+  };
+
+  if (status) {
+    where.status = status;
+  }
+
+  const result = await prisma.article.deleteMany({ where });
 
   return result.count;
 }
@@ -629,6 +641,7 @@ export async function updateArticleWithOptimisticLock(
           importance: data.importance,
           content: data.content,
           contentPlainText: tokenizeChinese(stripHtml(data.content)),
+          status: data.status,
           categoryId: data.categoryId || null,
         },
         include: {
@@ -674,6 +687,7 @@ function snapshotArticle(article: {
   importance: string;
   content: string;
   contentPlainText: string;
+  status: string;
   updatedAt: Date;
 }): ArticleSnapshot {
   return {
@@ -683,6 +697,7 @@ function snapshotArticle(article: {
     importance: article.importance,
     content: article.content,
     contentPlainText: article.contentPlainText,
+    status: article.status,
     updatedAt: article.updatedAt.toISOString(),
   };
 }
@@ -701,6 +716,8 @@ export async function previewBatchOperation(
       importance: true,
       content: true,
       contentPlainText: true,
+      status: true,
+      updatedAt: true,
     },
   });
 
@@ -1072,6 +1089,7 @@ export async function undoBatchOperation(
                 importance: snapshot.importance,
                 content: snapshot.content,
                 contentPlainText: snapshot.contentPlainText,
+                status: snapshot.status,
                 createdAt: new Date(snapshot.updatedAt),
                 updatedAt: new Date(snapshot.updatedAt),
                 views: 0,
@@ -1087,6 +1105,7 @@ export async function undoBatchOperation(
                 importance: snapshot.importance,
                 content: snapshot.content,
                 contentPlainText: snapshot.contentPlainText,
+                status: snapshot.status,
               },
             });
             restoredCount++;

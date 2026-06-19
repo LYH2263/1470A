@@ -20,6 +20,11 @@ async function handler(
       ? req.query.keyword.trim().slice(0, SEARCH.MAX_KEYWORD_LENGTH)
       : '';
 
+    const statusRaw = req.query.status as string | undefined;
+    const status = statusRaw === 'all' || statusRaw === 'draft' || statusRaw === 'published'
+      ? statusRaw
+      : 'published';
+
     if (!keyword || keyword.length < SEARCH.MIN_QUERY_LENGTH) {
       return res.status(200).json({
         success: true,
@@ -27,7 +32,7 @@ async function handler(
       });
     }
 
-    const suggestions = await getSearchSuggestions(keyword, SEARCH.SUGGESTION_LIMIT);
+    const suggestions = await getSearchSuggestions(keyword, SEARCH.SUGGESTION_LIMIT, status);
 
     return res.status(200).json({
       success: true,

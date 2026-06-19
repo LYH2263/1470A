@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Table, Button, Input, Space, Modal, message, Tag, Card, Dropdown, Select } from 'antd';
+import { Table, Button, Input, Space, Modal, message, Tag, Card, Dropdown, Select, Checkbox } from 'antd';
 import { SearchOutlined, DownOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import type { Article, ArticleListResponse, SearchSuggestion } from '@/types/article';
@@ -26,6 +26,7 @@ export default function ArticlesPage() {
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState<string | undefined | null>(undefined);
+  const [includeDrafts, setIncludeDrafts] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
@@ -38,6 +39,7 @@ export default function ArticlesPage() {
         ...(keyword && { keyword }),
         ...(categoryId !== undefined && categoryId !== null && { categoryId }),
         ...(categoryId === null && { categoryId: '' }),
+        status: includeDrafts ? 'all' : 'published',
       });
 
       const response = await fetchWithAuth(`/api/articles?${params}`);
@@ -56,7 +58,7 @@ export default function ArticlesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, keyword, categoryId]);
+  }, [page, pageSize, keyword, categoryId, includeDrafts]);
 
   useEffect(() => {
     void fetchArticles();
@@ -91,7 +93,8 @@ export default function ArticlesPage() {
       return;
     }
     try {
-      const response = await fetchWithAuth(`/api/search/suggest?keyword=${encodeURIComponent(value.trim())}`);
+      const status = includeDrafts ? 'all' : 'published';
+      const response = await fetchWithAuth(`/api/search/suggest?keyword=${encodeURIComponent(value.trim())}&status=${status}`);
       const result = await response.json();
       if (result.success && result.data) {
         setSuggestions(result.data);
@@ -113,7 +116,7 @@ export default function ArticlesPage() {
     debounceTimer.current = setTimeout(() => {
       void fetchSuggestions(value);
     }, 300);
-  }, [fetchSuggestions]);
+  }, [fetchSuggestions, includeDrafts]);
 
   const handleSearch = () => {
     setKeyword(searchInput.trim());
@@ -125,6 +128,7 @@ export default function ArticlesPage() {
     setSearchInput('');
     setKeyword('');
     setCategoryId(undefined);
+    setIncludeDrafts(false);
     setPage(1);
     setSuggestions([]);
     setShowSuggestions(false);
@@ -269,6 +273,17 @@ export default function ArticlesPage() {
       },
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: 'draft' | 'published') => {
+        return status === 'draft' 
+          ? <Tag color="orange">草稿</Tag> 
+          : <Tag color="green">已发布</Tag>;
+      },
+    },
+    {
       title: '分类',
       dataIndex: ['category', 'name'],
       key: 'category',
@@ -387,6 +402,15 @@ export default function ArticlesPage() {
                   </Select.Option>
                 ))}
               </Select>
+              <Checkbox
+                checked={includeDrafts}
+                onChange={(e) => {
+                  setIncludeDrafts(e.target.checked);
+                  setPage(1);
+                }}
+              >
+                含草稿
+              </Checkbox>
               <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
                 搜索
               </Button>

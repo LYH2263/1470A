@@ -77,7 +77,8 @@ export async function searchArticles(
   keyword: string,
   page: number,
   pageSize: number,
-  categoryId?: string | null
+  categoryId?: string | null,
+  status: 'draft' | 'published' | 'all' = 'published'
 ): Promise<{ data: FtsSearchResult[]; total: number }> {
   await ensureFtsTable();
 
@@ -92,6 +93,11 @@ export async function searchArticles(
     params.push(categoryId);
   } else if (categoryId === null) {
     whereConditions.push(`a."categoryId" IS NULL`);
+  }
+
+  if (status !== 'all') {
+    whereConditions.push(`a."status" = ?`);
+    params.push(status);
   }
 
   const whereClause = whereConditions.join(' AND ');
@@ -118,6 +124,7 @@ export async function searchArticles(
       snippet: string | null;
       categoryId: string | null;
       categoryName: string | null;
+      status: string;
     })[]
   >(
     `SELECT
@@ -129,6 +136,7 @@ export async function searchArticles(
       a."views",
       a."content",
       a."contentPlainText",
+      a."status",
       a."updatedAt",
       a."categoryId",
       c."name" as "categoryName",
@@ -164,6 +172,7 @@ export async function searchArticles(
     views: row.views,
     content: row.content,
     contentPlainText: row.contentPlainText,
+    status: row.status,
     updatedAt: row.updatedAt.toISOString(),
     rank: row.rank,
     highlightTitle: row.highlightTitle,
@@ -178,11 +187,22 @@ export async function searchArticles(
 
 export async function getSearchSuggestions(
   keyword: string,
-  limit: number = SEARCH.SUGGESTION_LIMIT
+  limit: number = SEARCH.SUGGESTION_LIMIT,
+  status: 'draft' | 'published' | 'all' = 'published'
 ): Promise<SearchSuggestion[]> {
   await ensureFtsTable();
 
   const ftsQuery = buildFtsQuery(keyword);
+
+  const whereConditions: string[] = [`"ArticleFts" MATCH ?`];
+  const params: any[] = [ftsQuery];
+
+  if (status !== 'all') {
+    whereConditions.push(`a."status" = ?`);
+    params.push(status);
+  }
+
+  const whereClause = whereConditions.join(' AND ');
 
   const rows = await prisma.$queryRawUnsafe<
     { id: string; title: string; author: string }[]
@@ -190,10 +210,10 @@ export async function getSearchSuggestions(
     `SELECT a."id", a."title", a."author"
      FROM "ArticleFts" fts
      JOIN "Article" a ON fts.rowid = a.rowid
-     WHERE "ArticleFts" MATCH ?
+     WHERE ${whereClause}
      ORDER BY fts.rank
      LIMIT ?`,
-    ftsQuery,
+    ...params,
     limit
   );
 

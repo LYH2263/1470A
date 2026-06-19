@@ -9,6 +9,7 @@ export interface Article {
   views: number;
   content: string;
   contentPlainText?: string;
+  status: 'draft' | 'published';
   updatedAt: string;
   categoryId: string | null;
   category?: {
@@ -30,6 +31,7 @@ export interface ArticleFormData {
   createdAt: string;
   importance: 'low' | 'medium' | 'high';
   content: string;
+  status: 'draft' | 'published';
   categoryId?: string | null;
 }
 
@@ -38,6 +40,7 @@ export interface ArticleListQuery {
   pageSize: number;                              // 每页条数
   keyword?: string;                              // 搜索关键词
   categoryId?: string | null;                    // 分类筛选
+  status?: 'draft' | 'published' | 'all';        // 状态筛选，默认 published
 }
 
 export interface ArticleListResponse {
@@ -52,6 +55,7 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   message?: string;
   error?: string;
+  [key: string]: unknown;
 }
 
 // 编辑锁相关类型
@@ -142,6 +146,7 @@ export interface FtsSearchResult {
   views: number;
   content: string;
   contentPlainText: string;
+  status: string;
   updatedAt: string;
   rank: number;
   highlightTitle: string | null;
@@ -211,6 +216,7 @@ export interface ArticleSnapshot {
   importance: string;
   content: string;
   contentPlainText: string;
+  status: string;
   updatedAt: string;
 }
 

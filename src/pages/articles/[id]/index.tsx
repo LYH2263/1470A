@@ -60,6 +60,7 @@ export default function ArticleDetailPage() {
   }
 
   const importanceConfig = importanceMap[article.importance];
+  const isDraft = article.status === 'draft';
 
   // 使用扩展白名单的 DOMPurify 清理 HTML 内容，支持表格和视频
   const sanitizedContent = sanitizeRichContent(article.content);
@@ -68,7 +69,12 @@ export default function ArticleDetailPage() {
     <MainLayout>
       <div style={{ padding: '24px' }}>
         <Card
-          title="文章详情"
+          title={
+            <Space>
+              文章详情
+              {isDraft && <Tag color="orange">草稿</Tag>}
+            </Space>
+          }
           extra={
             <Space>
               <Button onClick={() => router.push(`/articles/${id}/edit`)}>编辑</Button>
@@ -76,34 +82,48 @@ export default function ArticleDetailPage() {
             </Space>
           }
         >
-          <Descriptions bordered column={2}>
-            <Descriptions.Item label="标题" span={2}>
-              {article.title}
-            </Descriptions.Item>
-            <Descriptions.Item label="作者">
-              {article.author}
-            </Descriptions.Item>
-            <Descriptions.Item label="创建时间">
-              {formatDate(article.createdAt)}
-            </Descriptions.Item>
-            <Descriptions.Item label="重要性">
-              <Tag color={importanceConfig.color}>{importanceConfig.label}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="分类">
-              {article.category ? (
-                <Tag color="blue">{article.category.name}</Tag>
-              ) : (
-                <Tag color="default">未分类</Tag>
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label="阅读数">{article.views}</Descriptions.Item>
-            <Descriptions.Item label="内容" span={2}>
-              <div
-                className="article-content"
-                dangerouslySetInnerHTML={{ __html: sanitizedContent }}
-              />
-            </Descriptions.Item>
-          </Descriptions>
+          <div style={{ position: 'relative' }}>
+            {isDraft && (
+              <div className="draft-watermark">
+                未发布
+              </div>
+            )}
+            <Descriptions bordered column={2}>
+              <Descriptions.Item label="标题" span={2}>
+                {article.title}
+              </Descriptions.Item>
+              <Descriptions.Item label="作者">
+                {article.author}
+              </Descriptions.Item>
+              <Descriptions.Item label="创建时间">
+                {formatDate(article.createdAt)}
+              </Descriptions.Item>
+              <Descriptions.Item label="重要性">
+                <Tag color={importanceConfig.color}>{importanceConfig.label}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {isDraft ? (
+                  <Tag color="orange">草稿</Tag>
+                ) : (
+                  <Tag color="green">已发布</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="分类">
+                {article.category ? (
+                  <Tag color="blue">{article.category.name}</Tag>
+                ) : (
+                  <Tag color="default">未分类</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="阅读数">{article.views}</Descriptions.Item>
+              <Descriptions.Item label="内容" span={2}>
+                <div
+                  className="article-content"
+                  dangerouslySetInnerHTML={{ __html: sanitizedContent }}
+                />
+              </Descriptions.Item>
+            </Descriptions>
+          </div>
         </Card>
       </div>
     </MainLayout>

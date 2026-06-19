@@ -47,6 +47,7 @@ model Article {
   views            Int               @default(0)
   content          String            // 富文本内容（HTML）
   contentPlainText String            @default("")  // 纯文本内容，用于FTS5索引
+  status           String            @default("published") // 'draft', 'published'
   updatedAt        DateTime          @updatedAt
   editLock         ArticleEditLock?
   categoryId       String?
@@ -56,6 +57,7 @@ model Article {
   @@index([createdAt])
   @@index([author])
   @@index([categoryId])
+  @@index([status])
 }
 
 model ArticleEditLock {

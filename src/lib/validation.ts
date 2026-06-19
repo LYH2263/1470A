@@ -23,6 +23,9 @@ export const ArticleSchema = z.object({
   content: z
     .string()
     .min(1, '内容不能为空'),
+  status: z.enum(['draft', 'published'], {
+    message: '状态必须是 draft 或 published',
+  }),
   categoryId: z
     .string()
     .uuid('分类格式不正确')

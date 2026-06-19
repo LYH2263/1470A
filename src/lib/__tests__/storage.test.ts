@@ -65,6 +65,7 @@ import { prisma } from '@/lib/prisma';
 function toPrismaArticle(article: ReturnType<typeof createMockArticle>) {
   return {
     ...article,
+    contentPlainText: article.contentPlainText || '',
     createdAt: new Date(article.createdAt),
     updatedAt: new Date(article.updatedAt),
   };
@@ -119,6 +120,7 @@ describe('Storage Layer - 数据正确性测试', () => {
         views: 0,
         content: '<p>测试内容</p>',
         contentPlainText: '测试内容',
+        status: 'published',
         updatedAt: new Date().toISOString(),
         rank: -1,
         highlightTitle: '<mark>测试</mark>文章',
@@ -133,7 +135,7 @@ describe('Storage Layer - 数据正确性测试', () => {
 
       const result = await getArticles({ page: 1, pageSize: 10, keyword });
 
-      expect(searchArticles).toHaveBeenCalledWith(keyword, 1, 10);
+      expect(searchArticles).toHaveBeenCalledWith(keyword, 1, 10, undefined, 'published');
       expect(result.data).toHaveLength(1);
       expect(result.data[0].highlight).toBeDefined();
       expect(result.data[0].highlight?.title).toBe('<mark>测试</mark>文章');

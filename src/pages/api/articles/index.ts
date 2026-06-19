@@ -44,7 +44,12 @@ async function handler(
           : (req.query.categoryId as string)
         : undefined;
 
-      const result = await getArticles({ page, pageSize, keyword, categoryId });
+      const statusRaw = req.query.status as string | undefined;
+      const status = statusRaw === 'all' || statusRaw === 'draft' || statusRaw === 'published'
+        ? statusRaw
+        : 'published';
+
+      const result = await getArticles({ page, pageSize, keyword, categoryId, status });
 
       return res.status(200).json({
         success: true,
@@ -152,9 +157,9 @@ async function handler(
       });
     }
   } else if (req.method === 'DELETE') {
-    // 批量删除文章
+    // 批量删除文章（支持按状态过滤）
     try {
-      const { ids } = req.body;
+      const { ids, status } = req.body;
 
       if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({
@@ -174,7 +179,7 @@ async function handler(
         });
       }
 
-      const deletedCount = await deleteArticles(validIds);
+      const deletedCount = await deleteArticles(validIds, status);
 
       return res.status(200).json({
         success: true,

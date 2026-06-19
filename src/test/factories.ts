@@ -16,6 +16,8 @@ export function createMockArticle(overrides?: Partial<Article>): Article {
     importance: 'medium',
     views: 0,
     content: '<p>这是测试内容</p>',
+    contentPlainText: '这是测试内容',
+    status: 'published',
     updatedAt: now,
     categoryId: null,
     ...overrides,
@@ -36,6 +38,7 @@ export function createMockArticleFormData(
     createdAt: now,
     importance: 'medium',
     content: '<p>这是测试内容</p>',
+    status: 'published',
     categoryId: null,
     ...overrides,
   };

@@ -25,6 +25,7 @@ interface ArticleFormValues {
   createdAt: Dayjs;
   importance: ArticleFormData['importance'];
   content: string;
+  status: 'draft' | 'published';
   categoryId: string;
 }
 
@@ -208,6 +209,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
         createdAt: values.createdAt.toDate().toISOString(),
         importance: values.importance,
         content: values.content,
+        status: values.status,
         categoryId: values.categoryId,
       };
 
@@ -266,10 +268,12 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
           ? {
               ...initialValues,
               createdAt: dayjs(initialValues.createdAt),
+              status: initialValues.status || 'published',
               categoryId: initialValues.categoryId || undefined,
             }
           : {
               importance: 'medium',
+              status: 'published',
               createdAt: dayjs(),
             }
       }
@@ -318,6 +322,19 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
             { value: 'low', label: '低' },
             { value: 'medium', label: '中' },
             { value: 'high', label: '高' },
+          ]}
+        />
+      </Form.Item>
+
+      <Form.Item
+        label="状态"
+        name="status"
+        rules={[{ required: true, message: '请选择状态' }]}
+      >
+        <Select
+          options={[
+            { value: 'draft', label: '草稿' },
+            { value: 'published', label: '已发布' },
           ]}
         />
       </Form.Item>
