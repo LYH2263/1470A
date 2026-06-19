@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Table, Button, Input, Space, Modal, message, Tag, Card } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { Table, Button, Input, Space, Modal, message, Tag, Card, Dropdown } from 'antd';
+import { SearchOutlined, DownOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import type { Article, ArticleListResponse, SearchSuggestion } from '@/types/article';
 import { formatDate, importanceMap } from '@/lib/utils';
 import MainLayout from '@/components/layout/MainLayout';
 import { fetchWithAuth } from '@/lib/api';
-import type { TableProps } from 'antd';
+import type { TableProps, MenuProps } from 'antd';
+import BatchOperationCenter from '@/components/articles/BatchOperationCenter';
 
 export default function ArticlesPage() {
   const router = useRouter();
@@ -20,6 +21,7 @@ export default function ArticlesPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
@@ -338,9 +340,50 @@ export default function ArticlesPage() {
               <Button type="primary" onClick={() => router.push('/articles/create')}>
                 新增
               </Button>
-              <Button danger onClick={handleBatchDelete} disabled={selectedRowKeys.length === 0}>
-                批量删除
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'batch-operations',
+                      label: '批量操作',
+                      type: 'group',
+                    },
+                    {
+                      key: 'update-author',
+                      label: '批量改作者',
+                      onClick: () => setBatchModalOpen(true),
+                    },
+                    {
+                      key: 'update-importance',
+                      label: '批量改重要性',
+                      onClick: () => setBatchModalOpen(true),
+                    },
+                    {
+                      key: 'append-footer',
+                      label: '追加页脚声明',
+                      onClick: () => setBatchModalOpen(true),
+                    },
+                    {
+                      key: 'replace-content',
+                      label: '替换正文片段',
+                      onClick: () => setBatchModalOpen(true),
+                    },
+                    {
+                      type: 'divider',
+                    },
+                    {
+                      key: 'batch-delete',
+                      label: <span style={{ color: '#ff4d4f' }}>批量删除</span>,
+                      onClick: handleBatchDelete,
+                    },
+                  ] as MenuProps['items'],
+                }}
+                disabled={selectedRowKeys.length === 0}
+              >
+                <Button>
+                批量操作 <DownOutlined />
               </Button>
+            </Dropdown>
             </Space>
           </div>
 
@@ -364,6 +407,16 @@ export default function ArticlesPage() {
           />
         </Card>
       </div>
+
+      <BatchOperationCenter
+        open={batchModalOpen}
+        selectedIds={selectedRowKeys}
+        onClose={() => setBatchModalOpen(false)}
+        onSuccess={() => {
+          setSelectedRowKeys([]);
+          fetchArticles();
+        }}
+      />
     </MainLayout>
   );
 }

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { stripHtml, tokenizeChinese, searchArticles } from './search';
+import { safeReplaceContent, checkHtmlStructureSafety, sanitizeHtmlContent } from './batch-utils';
 import type {
   Article,
   ArticleFormData,
@@ -11,6 +12,15 @@ import type {
   LockStatus,
   UpdateArticleWithOptimisticLock,
   SearchHighlight,
+  BatchOperationType,
+  BatchOperationParams,
+  BatchPreviewResult,
+  ArticleDiffPreview,
+  ArticleSnapshot,
+  BatchOperationError,
+  BatchExecuteResult,
+  BatchOperationLog as BatchOperationLogType,
+  BatchUndoResult,
 } from '@/types/article';
 import { LOCK_CONSTANTS } from '@/types/article';
 
@@ -590,4 +600,476 @@ export async function cleanExpiredLocks(): Promise<number> {
     },
   });
   return result.count;
+}
+
+function snapshotArticle(article: {
+  id: string;
+  title: string;
+  author: string;
+  importance: string;
+  content: string;
+  contentPlainText: string;
+  updatedAt: Date;
+}): ArticleSnapshot {
+  return {
+    id: article.id,
+    title: article.title,
+    author: article.author,
+    importance: article.importance,
+    content: article.content,
+    contentPlainText: article.contentPlainText,
+    updatedAt: article.updatedAt.toISOString(),
+  };
+}
+
+export async function previewBatchOperation(
+  articleIds: string[],
+  operationType: BatchOperationType,
+  params: BatchOperationParams
+): Promise<BatchPreviewResult> {
+  const articles = await prisma.article.findMany({
+    where: { id: { in: articleIds } },
+    select: {
+      id: true,
+      title: true,
+      author: true,
+      importance: true,
+      content: true,
+      contentPlainText: true,
+    },
+  });
+
+  const previews: ArticleDiffPreview[] = [];
+  const warnings: string[] = [];
+  let changedCount = 0;
+
+  for (const article of articles) {
+    switch (operationType) {
+      case 'batch_update_author': {
+        const newAuthor = (params as { author: string }).author;
+        const hasChange = article.author !== newAuthor;
+        if (hasChange) changedCount++;
+        previews.push({
+          articleId: article.id,
+          articleTitle: article.title,
+          field: 'author',
+          oldValue: article.author,
+          newValue: newAuthor,
+          hasChange,
+        });
+        break;
+      }
+      case 'batch_update_importance': {
+        const newImportance = (params as { importance: string }).importance;
+        const hasChange = article.importance !== newImportance;
+        if (hasChange) changedCount++;
+        previews.push({
+          articleId: article.id,
+          articleTitle: article.title,
+          field: 'importance',
+          oldValue: article.importance,
+          newValue: newImportance,
+          hasChange,
+        });
+        break;
+      }
+      case 'batch_append_footer': {
+        const footerHtml = (params as { footerHtml: string }).footerHtml;
+        const safeFooter = sanitizeHtmlContent(footerHtml);
+        const newContent = article.content + safeFooter;
+        const hasChange = article.content !== newContent;
+        if (hasChange) changedCount++;
+        
+        const safetyCheck = checkHtmlStructureSafety(article.content, newContent);
+        if (!safetyCheck.isSafe) {
+          warnings.push(`文章「${article.title}」: ${safetyCheck.warnings.join('; ')}`);
+        }
+        
+        previews.push({
+          articleId: article.id,
+          articleTitle: article.title,
+          field: 'content',
+          oldValue: article.content,
+          newValue: newContent,
+          hasChange,
+        });
+        break;
+      }
+      case 'batch_replace_content': {
+        const { pattern, replacement, isRegex, caseSensitive } = params as {
+          pattern: string;
+          replacement: string;
+          isRegex: boolean;
+          caseSensitive?: boolean;
+        };
+        
+        try {
+          const result = safeReplaceContent(
+            article.content,
+            pattern,
+            replacement,
+            isRegex,
+            caseSensitive
+          );
+          
+          const hasChange = result.replaceCount > 0;
+          if (hasChange) changedCount++;
+          
+          if (hasChange) {
+            const safetyCheck = checkHtmlStructureSafety(article.content, result.text);
+            if (!safetyCheck.isSafe) {
+              warnings.push(`文章「${article.title}」: ${safetyCheck.warnings.join('; ')}`);
+            }
+          }
+          
+          previews.push({
+            articleId: article.id,
+            articleTitle: article.title,
+            field: 'content',
+            oldValue: article.content,
+            newValue: result.text,
+            hasChange,
+          });
+        } catch (error) {
+          warnings.push(`文章「${article.title}」替换失败: ${error instanceof Error ? error.message : '未知错误'}`);
+          previews.push({
+            articleId: article.id,
+            articleTitle: article.title,
+            field: 'content',
+            oldValue: article.content,
+            newValue: article.content,
+            hasChange: false,
+          });
+        }
+        break;
+      }
+      case 'batch_delete': {
+        changedCount = articles.length;
+        previews.push({
+          articleId: article.id,
+          articleTitle: article.title,
+          field: 'deleted',
+          oldValue: article.title,
+          newValue: '(已删除)',
+          hasChange: true,
+        });
+        break;
+      }
+    }
+  }
+
+  return {
+    articleIds: articles.map(a => a.id),
+    articleCount: articles.length,
+    changedCount,
+    previews,
+    warnings,
+  };
+}
+
+export async function executeBatchOperation(
+  articleIds: string[],
+  operationType: BatchOperationType,
+  params: BatchOperationParams,
+  operatorId: string,
+  operatorName: string
+): Promise<BatchExecuteResult> {
+  const articles = await prisma.article.findMany({
+    where: { id: { in: articleIds } },
+  });
+
+  const snapshots: ArticleSnapshot[] = articles.map(snapshotArticle);
+  
+  const errors: BatchOperationError[] = [];
+  let successCount = 0;
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const txErrors: BatchOperationError[] = [];
+      let txSuccessCount = 0;
+
+      for (const article of articles) {
+        try {
+          switch (operationType) {
+            case 'batch_update_author': {
+              await tx.article.update({
+                where: { id: article.id },
+                data: { author: (params as { author: string }).author },
+              });
+              break;
+            }
+            case 'batch_update_importance': {
+              await tx.article.update({
+                where: { id: article.id },
+                data: { importance: (params as { importance: string }).importance },
+              });
+              break;
+            }
+            case 'batch_append_footer': {
+              const footerHtml = (params as { footerHtml: string }).footerHtml;
+              const safeFooter = sanitizeHtmlContent(footerHtml);
+              const newContent = article.content + safeFooter;
+              const newPlainText = tokenizeChinese(stripHtml(newContent));
+              await tx.article.update({
+                where: { id: article.id },
+                data: { 
+                  content: newContent,
+                  contentPlainText: newPlainText,
+                },
+              });
+              break;
+            }
+            case 'batch_replace_content': {
+              const { pattern, replacement, isRegex, caseSensitive } = params as {
+                pattern: string;
+                replacement: string;
+                isRegex: boolean;
+                caseSensitive?: boolean;
+              };
+              const result = safeReplaceContent(
+                article.content,
+                pattern,
+                replacement,
+                isRegex,
+                caseSensitive
+              );
+              const newPlainText = tokenizeChinese(stripHtml(result.text));
+              await tx.article.update({
+                where: { id: article.id },
+                data: { 
+                  content: result.text,
+                  contentPlainText: newPlainText,
+                },
+              });
+              break;
+            }
+            case 'batch_delete': {
+              await tx.article.delete({ where: { id: article.id } });
+              break;
+            }
+          }
+          txSuccessCount++;
+        } catch (error) {
+          txErrors.push({
+            articleId: article.id,
+            articleTitle: article.title,
+            error: error instanceof Error ? error.message : '操作失败',
+          });
+        }
+      }
+
+      if (txErrors.length > 0 && txSuccessCount > 0) {
+        return { successCount: txSuccessCount, errors: txErrors, partialSuccess: true };
+      } else if (txErrors.length > 0) {
+        throw new Error(`全部操作失败: ${txErrors.map(e => e.error).join(', ')}`);
+      }
+
+      return { successCount: txSuccessCount, errors: txErrors, partialSuccess: false };
+    }, {
+      timeout: 30000,
+    });
+
+    successCount = result.successCount;
+    errors.push(...result.errors);
+  } catch (error) {
+    return {
+      success: false,
+      successCount: 0,
+      failureCount: articles.length,
+      totalCount: articles.length,
+      errors: articles.map(a => ({
+        articleId: a.id,
+        articleTitle: a.title,
+        error: error instanceof Error ? error.message : '事务执行失败',
+      })),
+      status: 'failed',
+    };
+  }
+
+  const failureCount = errors.length;
+  const status: 'success' | 'partial_failure' | 'failed' = 
+    failureCount === 0 ? 'success' : 
+    successCount > 0 ? 'partial_failure' : 'failed';
+
+  const log = await prisma.batchOperationLog.create({
+    data: {
+      operationType,
+      operatorId,
+      operatorName,
+      articleIds: JSON.stringify(articles.map(a => a.id)),
+      articleCount: articles.length,
+      params: JSON.stringify(params),
+      snapshots: JSON.stringify(snapshots),
+      status,
+      successCount,
+      failureCount,
+      errorDetails: errors.length > 0 ? JSON.stringify(errors) : null,
+    },
+  });
+
+  return {
+    success: status !== 'failed',
+    operationId: log.id,
+    successCount,
+    failureCount,
+    totalCount: articles.length,
+    errors,
+    status,
+  };
+}
+
+export async function getLatestBatchOperation(
+  operatorId: string
+): Promise<BatchOperationLogType | null> {
+  const log = await prisma.batchOperationLog.findFirst({
+    where: { 
+      operatorId,
+      status: { in: ['success', 'partial_failure'] },
+      reverted: false,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!log) return null;
+
+  return {
+    id: log.id,
+    operationType: log.operationType as BatchOperationType,
+    operatorId: log.operatorId,
+    operatorName: log.operatorName,
+    articleIds: JSON.parse(log.articleIds),
+    articleCount: log.articleCount,
+    params: JSON.parse(log.params) as BatchOperationParams,
+    status: log.status as 'success' | 'partial_failure' | 'failed',
+    successCount: log.successCount,
+    failureCount: log.failureCount,
+    errorDetails: log.errorDetails ? JSON.parse(log.errorDetails) as BatchOperationError[] : undefined,
+    createdAt: log.createdAt.toISOString(),
+    updatedAt: log.updatedAt.toISOString(),
+    reverted: log.reverted,
+    revertedAt: log.revertedAt?.toISOString(),
+  };
+}
+
+export async function undoBatchOperation(
+  operationId: string,
+  operatorId: string
+): Promise<BatchUndoResult> {
+  const log = await prisma.batchOperationLog.findUnique({
+    where: { id: operationId },
+  });
+
+  if (!log) {
+    return {
+      success: false,
+      restoredCount: 0,
+      failureCount: 0,
+      errors: [{ articleId: '', articleTitle: '', error: '操作记录不存在' }],
+    };
+  }
+
+  if (log.reverted) {
+    return {
+      success: false,
+      restoredCount: 0,
+      failureCount: 0,
+      errors: [{ articleId: '', articleTitle: '', error: '该操作已被撤销' }],
+    };
+  }
+
+  if (log.operatorId !== operatorId) {
+    return {
+      success: false,
+      restoredCount: 0,
+      failureCount: 0,
+      errors: [{ articleId: '', articleTitle: '', error: '只能撤销自己执行的批量操作' }],
+    };
+  }
+
+  const snapshots: ArticleSnapshot[] = JSON.parse(log.snapshots);
+  const errors: BatchOperationError[] = [];
+  let restoredCount = 0;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const snapshot of snapshots) {
+        try {
+          const existing = await tx.article.findUnique({
+            where: { id: snapshot.id },
+          });
+
+          if (!existing && log.operationType === 'batch_delete') {
+            await tx.article.create({
+              data: {
+                id: snapshot.id,
+                title: snapshot.title,
+                author: snapshot.author,
+                importance: snapshot.importance,
+                content: snapshot.content,
+                contentPlainText: snapshot.contentPlainText,
+                createdAt: new Date(snapshot.updatedAt),
+                updatedAt: new Date(snapshot.updatedAt),
+                views: 0,
+              },
+            });
+            restoredCount++;
+          } else if (existing) {
+            await tx.article.update({
+              where: { id: snapshot.id },
+              data: {
+                title: snapshot.title,
+                author: snapshot.author,
+                importance: snapshot.importance,
+                content: snapshot.content,
+                contentPlainText: snapshot.contentPlainText,
+              },
+            });
+            restoredCount++;
+          } else {
+            errors.push({
+              articleId: snapshot.id,
+              articleTitle: snapshot.title,
+              error: '文章不存在，无法恢复',
+            });
+          }
+        } catch (error) {
+          errors.push({
+            articleId: snapshot.id,
+            articleTitle: snapshot.title,
+            error: error instanceof Error ? error.message : '恢复失败',
+          });
+        }
+      }
+    }, {
+      timeout: 30000,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      restoredCount: 0,
+      failureCount: snapshots.length,
+      errors: snapshots.map(s => ({
+        articleId: s.id,
+        articleTitle: s.title,
+        error: error instanceof Error ? error.message : '事务回滚失败',
+      })),
+    };
+  }
+
+  await prisma.batchOperationLog.update({
+    where: { id: operationId },
+    data: {
+      reverted: true,
+      revertedAt: new Date(),
+    },
+  });
+
+  const failureCount = errors.length;
+
+  return {
+    success: failureCount === 0,
+    restoredCount,
+    failureCount,
+    errors,
+  };
 }

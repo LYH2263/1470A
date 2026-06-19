@@ -147,3 +147,103 @@ export const LOCK_CONSTANTS = {
   HEARTBEAT_INTERVAL_MS: 60 * 1000,         // 心跳间隔 1 分钟
   HEARTBEAT_MARGIN_MS: 30 * 1000,           // 心跳续约余量 30 秒
 } as const;
+
+export type BatchOperationType = 
+  | 'batch_update_author'
+  | 'batch_update_importance'
+  | 'batch_append_footer'
+  | 'batch_replace_content'
+  | 'batch_delete';
+
+export interface BatchUpdateAuthorParams {
+  author: string;
+}
+
+export interface BatchUpdateImportanceParams {
+  importance: 'low' | 'medium' | 'high';
+}
+
+export interface BatchAppendFooterParams {
+  footerHtml: string;
+}
+
+export interface BatchReplaceContentParams {
+  pattern: string;
+  replacement: string;
+  isRegex: boolean;
+  caseSensitive?: boolean;
+}
+
+export type BatchOperationParams = 
+  | BatchUpdateAuthorParams
+  | BatchUpdateImportanceParams
+  | BatchAppendFooterParams
+  | BatchReplaceContentParams;
+
+export interface ArticleDiffPreview {
+  articleId: string;
+  articleTitle: string;
+  field: string;
+  oldValue: string;
+  newValue: string;
+  hasChange: boolean;
+}
+
+export interface BatchPreviewResult {
+  articleIds: string[];
+  articleCount: number;
+  changedCount: number;
+  previews: ArticleDiffPreview[];
+  warnings: string[];
+}
+
+export interface ArticleSnapshot {
+  id: string;
+  title: string;
+  author: string;
+  importance: string;
+  content: string;
+  contentPlainText: string;
+  updatedAt: string;
+}
+
+export interface BatchOperationError {
+  articleId: string;
+  articleTitle: string;
+  error: string;
+}
+
+export interface BatchExecuteResult {
+  success: boolean;
+  operationId?: string;
+  successCount: number;
+  failureCount: number;
+  totalCount: number;
+  errors: BatchOperationError[];
+  status: 'success' | 'partial_failure' | 'failed';
+}
+
+export interface BatchOperationLog {
+  id: string;
+  operationType: BatchOperationType;
+  operatorId: string;
+  operatorName: string;
+  articleIds: string[];
+  articleCount: number;
+  params: BatchOperationParams;
+  status: 'success' | 'partial_failure' | 'failed';
+  successCount: number;
+  failureCount: number;
+  errorDetails?: BatchOperationError[];
+  createdAt: string;
+  updatedAt: string;
+  reverted: boolean;
+  revertedAt?: string;
+}
+
+export interface BatchUndoResult {
+  success: boolean;
+  restoredCount: number;
+  failureCount: number;
+  errors: BatchOperationError[];
+}

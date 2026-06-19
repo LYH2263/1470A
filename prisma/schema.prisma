@@ -74,3 +74,27 @@ model SensitiveWord {
   @@index([enabled])
   @@unique([word])
 }
+
+model BatchOperationLog {
+  id              String   @id @default(uuid())
+  operationType   String   // batch_update_author, batch_update_importance, batch_append_footer, batch_replace_content, batch_delete
+  operatorId      String
+  operatorName    String
+  articleIds      String   // JSON string array
+  articleCount    Int
+  params          String   // JSON string, operation parameters
+  snapshots       String   // JSON string, article snapshots before operation for undo
+  status          String   // success, partial_failure, failed
+  successCount    Int      @default(0)
+  failureCount    Int      @default(0)
+  errorDetails    String?  // JSON string, error details per article
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  reverted        Boolean  @default(false)
+  revertedAt      DateTime?
+
+  @@index([operationType])
+  @@index([operatorId])
+  @@index([createdAt])
+  @@index([status])
+}
