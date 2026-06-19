@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Table, Button, Input, Space, Modal, message, Tag, Card, Dropdown } from 'antd';
+import { Table, Button, Input, Space, Modal, message, Tag, Card, Dropdown, Select } from 'antd';
 import { SearchOutlined, DownOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import type { Article, ArticleListResponse, SearchSuggestion } from '@/types/article';
@@ -8,6 +8,8 @@ import MainLayout from '@/components/layout/MainLayout';
 import { fetchWithAuth } from '@/lib/api';
 import type { TableProps, MenuProps } from 'antd';
 import BatchOperationCenter from '@/components/articles/BatchOperationCenter';
+import { getAllCategories } from '@/lib/api-category';
+import type { Category } from '@/types/category';
 
 export default function ArticlesPage() {
   const router = useRouter();
@@ -22,6 +24,8 @@ export default function ArticlesPage() {
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryId, setCategoryId] = useState<string | undefined | null>(undefined);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
@@ -32,6 +36,8 @@ export default function ArticlesPage() {
         page: String(page),
         pageSize: String(pageSize),
         ...(keyword && { keyword }),
+        ...(categoryId !== undefined && categoryId !== null && { categoryId }),
+        ...(categoryId === null && { categoryId: '' }),
       });
 
       const response = await fetchWithAuth(`/api/articles?${params}`);
@@ -50,11 +56,23 @@ export default function ArticlesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, keyword]);
+  }, [page, pageSize, keyword, categoryId]);
 
   useEffect(() => {
     void fetchArticles();
   }, [fetchArticles]);
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const data = await getAllCategories();
+        setCategories(data);
+      } catch (error) {
+        console.error('获取分类列表失败:', error);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -106,6 +124,7 @@ export default function ArticlesPage() {
   const handleReset = () => {
     setSearchInput('');
     setKeyword('');
+    setCategoryId(undefined);
     setPage(1);
     setSuggestions([]);
     setShowSuggestions(false);
@@ -250,6 +269,18 @@ export default function ArticlesPage() {
       },
     },
     {
+      title: '分类',
+      dataIndex: ['category', 'name'],
+      key: 'category',
+      width: 120,
+      render: (name: string | undefined, record: Article) => {
+        if (record.categoryId && record.category) {
+          return <Tag color="blue">{record.category.name}</Tag>;
+        }
+        return <Tag color="default">未分类</Tag>;
+      },
+    },
+    {
       title: '阅读数',
       dataIndex: 'views',
       key: 'views',
@@ -333,6 +364,29 @@ export default function ArticlesPage() {
                   </div>
                 )}
               </div>
+              <Select
+                placeholder="按分类筛选"
+                style={{ width: 180 }}
+                allowClear
+                value={categoryId === undefined ? undefined : categoryId === null ? 'uncategorized' : categoryId}
+                onChange={(value) => {
+                  if (value === undefined || value === null) {
+                    setCategoryId(undefined);
+                  } else if (value === 'uncategorized') {
+                    setCategoryId(null);
+                  } else {
+                    setCategoryId(value);
+                  }
+                  setPage(1);
+                }}
+              >
+                <Select.Option value="uncategorized">未分类</Select.Option>
+                {categories.map((cat) => (
+                  <Select.Option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </Select.Option>
+                ))}
+              </Select>
               <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
                 搜索
               </Button>

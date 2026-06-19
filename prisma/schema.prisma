@@ -24,6 +24,20 @@ model User {
   @@index([username])
 }
 
+model Category {
+  id          String    @id @default(uuid())
+  name        String    // 分类名称
+  sort        Int       @default(0) // 排序
+  description String?   // 分类描述
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  articles    Article[]
+
+  @@index([name])
+  @@index([sort])
+  @@unique([name])
+}
+
 model Article {
   id               String            @id @default(uuid())
   title            String
@@ -35,10 +49,13 @@ model Article {
   contentPlainText String            @default("")  // 纯文本内容，用于FTS5索引
   updatedAt        DateTime          @updatedAt
   editLock         ArticleEditLock?
+  categoryId       String?
+  category         Category?         @relation(fields: [categoryId], references: [id])
 
   @@index([title])
   @@index([createdAt])
   @@index([author])
+  @@index([categoryId])
 }
 
 model ArticleEditLock {

@@ -76,18 +76,31 @@ async function ensureFtsTable(): Promise<void> {
 export async function searchArticles(
   keyword: string,
   page: number,
-  pageSize: number
+  pageSize: number,
+  categoryId?: string | null
 ): Promise<{ data: FtsSearchResult[]; total: number }> {
   await ensureFtsTable();
 
   const ftsQuery = buildFtsQuery(keyword);
   const offset = (page - 1) * pageSize;
 
+  const whereConditions: string[] = [`"ArticleFts" MATCH ?`];
+  const params: any[] = [ftsQuery];
+
+  if (categoryId !== undefined && categoryId !== null && categoryId !== '') {
+    whereConditions.push(`a."categoryId" = ?`);
+    params.push(categoryId);
+  } else if (categoryId === null) {
+    whereConditions.push(`a."categoryId" IS NULL`);
+  }
+
+  const whereClause = whereConditions.join(' AND ');
+
   const countResult = await prisma.$queryRawUnsafe<
     { total: bigint }[]
   >(
-    `SELECT COUNT(*) as total FROM "ArticleFts" WHERE "ArticleFts" MATCH ?`,
-    ftsQuery
+    `SELECT COUNT(*) as total FROM "ArticleFts" fts JOIN "Article" a ON fts.rowid = a.rowid WHERE ${whereClause}`,
+    ...params
   );
   const total = Number(countResult[0]?.total ?? 0);
 
@@ -103,6 +116,8 @@ export async function searchArticles(
       highlightTitle: string | null;
       highlightAuthor: string | null;
       snippet: string | null;
+      categoryId: string | null;
+      categoryName: string | null;
     })[]
   >(
     `SELECT
@@ -115,13 +130,16 @@ export async function searchArticles(
       a."content",
       a."contentPlainText",
       a."updatedAt",
+      a."categoryId",
+      c."name" as "categoryName",
       fts.rank,
       highlight("ArticleFts", 0, ?, ?) as "highlightTitle",
       highlight("ArticleFts", 2, ?, ?) as "highlightAuthor",
       snippet("ArticleFts", 1, ?, ?, '...', ?, ?) as "snippet"
     FROM "ArticleFts" fts
     JOIN "Article" a ON fts.rowid = a.rowid
-    WHERE "ArticleFts" MATCH ?
+    LEFT JOIN "Category" c ON a."categoryId" = c."id"
+    WHERE ${whereClause}
     ORDER BY fts.rank
     LIMIT ? OFFSET ?`,
     pre,
@@ -132,7 +150,7 @@ export async function searchArticles(
     post,
     snippetLen,
     0,
-    ftsQuery,
+    ...params,
     pageSize,
     offset
   );
@@ -151,7 +169,9 @@ export async function searchArticles(
     highlightTitle: row.highlightTitle,
     highlightAuthor: row.highlightAuthor,
     snippet: row.snippet,
-  }));
+    categoryId: row.categoryId,
+    category: row.categoryId ? { id: row.categoryId, name: row.categoryName || '' } : null,
+  } as any));
 
   return { data, total };
 }

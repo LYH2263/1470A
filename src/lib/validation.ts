@@ -23,6 +23,50 @@ export const ArticleSchema = z.object({
   content: z
     .string()
     .min(1, '内容不能为空'),
+  categoryId: z
+    .string()
+    .uuid('分类格式不正确')
+    .optional()
+    .nullable(),
 });
 
 export type ArticleInput = z.infer<typeof ArticleSchema>;
+
+export const CategorySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '分类名称不能为空')
+    .max(50, '分类名称不能超过50个字符'),
+  sort: z
+    .number()
+    .int('排序必须是整数')
+    .optional()
+    .default(0),
+  description: z
+    .string()
+    .max(200, '描述不能超过200个字符')
+    .optional()
+    .nullable(),
+});
+
+export const CategoryUpdateSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '分类名称不能为空')
+    .max(50, '分类名称不能超过50个字符')
+    .optional(),
+  sort: z
+    .number()
+    .int('排序必须是整数')
+    .optional(),
+  description: z
+    .string()
+    .max(200, '描述不能超过200个字符')
+    .optional()
+    .nullable(),
+});
+
+export type CategoryInput = z.infer<typeof CategorySchema>;
+export type CategoryUpdateInput = z.infer<typeof CategoryUpdateSchema>;

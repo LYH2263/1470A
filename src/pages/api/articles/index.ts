@@ -38,7 +38,13 @@ async function handler(
             .slice(0, SEARCH.MAX_KEYWORD_LENGTH)
         : undefined;
 
-      const result = await getArticles({ page, pageSize, keyword });
+      const categoryId = req.query.categoryId !== undefined
+        ? req.query.categoryId === '' || req.query.categoryId === null
+          ? null
+          : (req.query.categoryId as string)
+        : undefined;
+
+      const result = await getArticles({ page, pageSize, keyword, categoryId });
 
       return res.status(200).json({
         success: true,

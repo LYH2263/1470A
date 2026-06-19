@@ -6,6 +6,7 @@ import {
   CloudServerOutlined,
   NotificationOutlined,
   ToolOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import type { MenuProps } from 'antd';
@@ -26,6 +27,11 @@ export default function Sidebar() {
       key: '/',
       icon: <FileTextOutlined />,
       label: '文章管理',
+    },
+    {
+      key: '/categories',
+      icon: <AppstoreOutlined />,
+      label: '分类管理',
     },
     {
       key: '/sensitive-words',

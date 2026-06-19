@@ -8,6 +8,8 @@ import type { Article, ArticleFormData, UpdateArticleWithOptimisticLock } from '
 import { fetchWithAuth } from '@/lib/api';
 import { detectSensitiveWords, getLevelColor, getLevelLabel, getCategoryLabel, getStrategyLabel } from '@/lib/api-sensitive-word';
 import type { SensitiveWordDetectionResult, SensitiveWordMatch } from '@/types/sensitive-word';
+import { getAllCategories } from '@/lib/api-category';
+import type { Category } from '@/types/category';
 
 interface ArticleFormProps {
   initialValues?: Article;
@@ -23,12 +25,15 @@ interface ArticleFormValues {
   createdAt: Dayjs;
   importance: ArticleFormData['importance'];
   content: string;
+  categoryId: string;
 }
 
 export default function ArticleForm({ initialValues, mode, formId, readOnly = false, onConflict }: ArticleFormProps) {
   const router = useRouter();
   const [form] = Form.useForm<ArticleFormValues>();
   const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
 
   const [detectionResult, setDetectionResult] = useState<SensitiveWordDetectionResult | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
@@ -96,6 +101,21 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
     titleRef.current = e.target.value;
     debouncedDetection();
   }, [debouncedDetection]);
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        setCategoriesLoading(true);
+        const data = await getAllCategories();
+        setCategories(data);
+      } catch (error) {
+        console.error('获取分类列表失败:', error);
+      } finally {
+        setCategoriesLoading(false);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   useEffect(() => {
     if (initialValues) {
@@ -188,6 +208,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
         createdAt: values.createdAt.toDate().toISOString(),
         importance: values.importance,
         content: values.content,
+        categoryId: values.categoryId,
       };
 
       let requestBody: object;
@@ -245,6 +266,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
           ? {
               ...initialValues,
               createdAt: dayjs(initialValues.createdAt),
+              categoryId: initialValues.categoryId || undefined,
             }
           : {
               importance: 'medium',
@@ -297,6 +319,21 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
             { value: 'medium', label: '中' },
             { value: 'high', label: '高' },
           ]}
+        />
+      </Form.Item>
+
+      <Form.Item
+        label="分类"
+        name="categoryId"
+        rules={[{ required: true, message: '请选择分类' }]}
+      >
+        <Select
+          loading={categoriesLoading}
+          placeholder="请选择分类"
+          options={categories.map((cat) => ({
+            value: cat.id,
+            label: cat.name,
+          }))}
         />
       </Form.Item>
 

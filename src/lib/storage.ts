@@ -35,6 +35,11 @@ function mapArticleToDTO(article: {
   content: string;
   contentPlainText?: string;
   updatedAt: Date;
+  categoryId: string | null;
+  category?: {
+    id: string;
+    name: string;
+  } | null;
 }): Article {
   return {
     id: article.id,
@@ -45,6 +50,8 @@ function mapArticleToDTO(article: {
     views: article.views,
     content: article.content,
     updatedAt: article.updatedAt.toISOString(),
+    categoryId: article.categoryId,
+    category: article.category || null,
   };
 }
 
@@ -75,10 +82,10 @@ function mapLockToDTO(lock: {
 
 // 获取文章列表（支持分页和搜索）
 export async function getArticles(query: ArticleListQuery): Promise<ArticleListResponse> {
-  const { page, pageSize, keyword } = query;
+  const { page, pageSize, keyword, categoryId } = query;
 
   if (keyword && keyword.trim()) {
-    const { data: ftsResults, total } = await searchArticles(keyword.trim(), page, pageSize);
+    const { data: ftsResults, total } = await searchArticles(keyword.trim(), page, pageSize, categoryId);
 
     const data: Article[] = ftsResults.map((row) => {
       const highlight: SearchHighlight = {};
@@ -95,6 +102,8 @@ export async function getArticles(query: ArticleListQuery): Promise<ArticleListR
         views: row.views,
         content: row.content,
         updatedAt: row.updatedAt,
+        categoryId: (row as any).categoryId || null,
+        category: (row as any).category || null,
         ...(Object.keys(highlight).length > 0 ? { highlight } : {}),
       };
     });
@@ -102,12 +111,25 @@ export async function getArticles(query: ArticleListQuery): Promise<ArticleListR
     return { data, total, page, pageSize };
   }
 
-  const where = {};
+  const where: any = {};
+  if (categoryId !== undefined && categoryId !== null && categoryId !== '') {
+    where.categoryId = categoryId;
+  } else if (categoryId === null) {
+    where.categoryId = null;
+  }
 
   const [total, articles] = await Promise.all([
     prisma.article.count({ where }),
     prisma.article.findMany({
       where,
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
       orderBy: {
         createdAt: 'desc',
       },
@@ -130,6 +152,14 @@ export async function getArticles(query: ArticleListQuery): Promise<ArticleListR
 export async function getArticleById(id: string): Promise<Article | null> {
   const article = await prisma.article.findUnique({
     where: { id },
+    include: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
   });
 
   if (!article) {
@@ -153,6 +183,15 @@ export async function createArticle(data: ArticleFormData): Promise<Article> {
       content: data.content,
       contentPlainText: tokenized,
       views: 0,
+      categoryId: data.categoryId || null,
+    },
+    include: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
   });
 
@@ -174,6 +213,15 @@ export async function updateArticle(id: string, data: ArticleFormData): Promise<
         importance: data.importance,
         content: data.content,
         contentPlainText: tokenized,
+        categoryId: data.categoryId || null,
+      },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -546,6 +594,14 @@ export async function updateArticleWithOptimisticLock(
     const result = await prisma.$transaction(async (tx) => {
       const article = await tx.article.findUnique({
         where: { id },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       });
 
       if (!article) {
@@ -573,6 +629,15 @@ export async function updateArticleWithOptimisticLock(
           importance: data.importance,
           content: data.content,
           contentPlainText: tokenizeChinese(stripHtml(data.content)),
+          categoryId: data.categoryId || null,
+        },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       });
 

@@ -10,6 +10,11 @@ export interface Article {
   content: string;
   contentPlainText?: string;
   updatedAt: string;
+  categoryId: string | null;
+  category?: {
+    id: string;
+    name: string;
+  } | null;
   highlight?: SearchHighlight;
 }
 
@@ -25,12 +30,14 @@ export interface ArticleFormData {
   createdAt: string;
   importance: 'low' | 'medium' | 'high';
   content: string;
+  categoryId?: string | null;
 }
 
 export interface ArticleListQuery {
   page: number;                                  // 当前页码
   pageSize: number;                              // 每页条数
   keyword?: string;                              // 搜索关键词
+  categoryId?: string | null;                    // 分类筛选
 }
 
 export interface ArticleListResponse {

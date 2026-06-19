@@ -89,6 +89,13 @@ export default function ArticleDetailPage() {
             <Descriptions.Item label="重要性">
               <Tag color={importanceConfig.color}>{importanceConfig.label}</Tag>
             </Descriptions.Item>
+            <Descriptions.Item label="分类">
+              {article.category ? (
+                <Tag color="blue">{article.category.name}</Tag>
+              ) : (
+                <Tag color="default">未分类</Tag>
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="阅读数">{article.views}</Descriptions.Item>
             <Descriptions.Item label="内容" span={2}>
               <div
