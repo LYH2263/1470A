@@ -10,9 +10,10 @@ vi.mock('@/lib/storage', () => ({
   getArticleById: vi.fn(),
   updateArticle: vi.fn(),
   deleteArticles: vi.fn(),
+  updateArticleWithOptimisticLock: vi.fn(),
 }));
 
-import { getArticleById, updateArticle, deleteArticles } from '@/lib/storage';
+import { getArticleById, updateArticle, deleteArticles, updateArticleWithOptimisticLock } from '@/lib/storage';
 
 describe('API /api/articles/[id] - 完整测试套件', () => {
   const validId = '123e4567-e89b-12d3-a456-426614174000';
@@ -420,6 +421,93 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       expect(jsonData.data.author).toBe(updateData.author);
       expect(jsonData.data.importance).toBe(updateData.importance);
       expect(jsonData.data.content).toBe(updateData.content);
+    });
+  });
+
+  describe('PUT - 乐观锁版本冲突检测', () => {
+    it('应该在提供 lastUpdatedAt 时使用乐观锁更新', async () => {
+      const lastUpdatedAt = new Date().toISOString();
+      const mockArticle = createMockArticle({ id: validId });
+
+      vi.mocked(updateArticleWithOptimisticLock).mockResolvedValue({
+        success: true,
+        article: mockArticle,
+      });
+
+      const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
+        method: 'PUT',
+        query: { id: validId },
+        body: {
+          title: '更新后的标题',
+          author: '更新后的作者',
+          createdAt: new Date().toISOString(),
+          importance: 'high',
+          content: '更新后的内容',
+          lastUpdatedAt,
+        },
+      });
+
+      await handler(req, res);
+
+      expect(res._getStatusCode()).toBe(200);
+      expect(updateArticleWithOptimisticLock).toHaveBeenCalled();
+      expect(updateArticle).not.toHaveBeenCalled();
+    });
+
+    it('应该在版本冲突时返回 409', async () => {
+      const lastUpdatedAt = new Date(Date.now() - 5000).toISOString();
+      const currentArticle = createMockArticle({ id: validId });
+
+      vi.mocked(updateArticleWithOptimisticLock).mockResolvedValue({
+        success: false,
+        conflict: true,
+        error: '文章已被其他用户修改，请刷新后重试',
+        currentArticle,
+      });
+
+      const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
+        method: 'PUT',
+        query: { id: validId },
+        body: {
+          title: '更新后的标题',
+          author: '更新后的作者',
+          createdAt: new Date().toISOString(),
+          importance: 'high',
+          content: '更新后的内容',
+          lastUpdatedAt,
+        },
+      });
+
+      await handler(req, res);
+
+      expect(res._getStatusCode()).toBe(409);
+      const jsonData = JSON.parse(res._getData());
+      expect(jsonData.success).toBe(false);
+      expect(jsonData.data.conflict).toBe(true);
+      expect(jsonData.data.currentArticle).toBeDefined();
+    });
+
+    it('应该在没有 lastUpdatedAt 时使用普通更新（向后兼容）', async () => {
+      const mockArticle = createMockArticle({ id: validId });
+      vi.mocked(updateArticle).mockResolvedValue(mockArticle);
+
+      const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
+        method: 'PUT',
+        query: { id: validId },
+        body: {
+          title: '更新后的标题',
+          author: '更新后的作者',
+          createdAt: new Date().toISOString(),
+          importance: 'high',
+          content: '更新后的内容',
+        },
+      });
+
+      await handler(req, res);
+
+      expect(res._getStatusCode()).toBe(200);
+      expect(updateArticle).toHaveBeenCalled();
+      expect(updateArticleWithOptimisticLock).not.toHaveBeenCalled();
     });
   });
 });

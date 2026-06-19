@@ -1,14 +1,17 @@
-import { Form, Input, Select, DatePicker, message } from 'antd';
+import { Form, Input, Select, DatePicker, message, Modal } from 'antd';
 import { useRouter } from 'next/router';
+import { useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import RichTextEditor from '@/components/common/RichTextEditor';
-import type { Article, ArticleFormData } from '@/types/article';
+import type { Article, ArticleFormData, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { fetchWithAuth } from '@/lib/api';
 
 interface ArticleFormProps {
   initialValues?: Article;
   mode: 'create' | 'edit';
   formId?: string;
+  readOnly?: boolean;
+  onConflict?: (currentArticle: Article) => void;
 }
 
 interface ArticleFormValues {
@@ -19,11 +22,29 @@ interface ArticleFormValues {
   content: string;
 }
 
-export default function ArticleForm({ initialValues, mode, formId }: ArticleFormProps) {
+export default function ArticleForm({ initialValues, mode, formId, readOnly = false, onConflict }: ArticleFormProps) {
   const router = useRouter();
   const [form] = Form.useForm<ArticleFormValues>();
+  const [submitting, setSubmitting] = useState(false);
+
+  const showConflictModal = (currentArticle: Article) => {
+    Modal.confirm({
+      title: '版本冲突',
+      content: '文章已被其他用户修改。您可以选择：\n1. 取消并保留您的修改\n2. 放弃您的修改并查看最新版本',
+      okText: '查看最新版本',
+      cancelText: '保留修改',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        onConflict?.(currentArticle);
+        router.reload();
+      },
+    });
+  };
 
   const onFinish = async (values: ArticleFormValues) => {
+    if (readOnly || submitting) return;
+
+    setSubmitting(true);
     try {
       const formData: ArticleFormData = {
         title: values.title,
@@ -32,6 +53,16 @@ export default function ArticleForm({ initialValues, mode, formId }: ArticleForm
         importance: values.importance,
         content: values.content,
       };
+
+      let requestBody: object;
+      if (mode === 'edit' && initialValues?.updatedAt) {
+        requestBody = {
+          ...formData,
+          lastUpdatedAt: initialValues.updatedAt,
+        } as UpdateArticleWithOptimisticLock;
+      } else {
+        requestBody = formData;
+      }
 
       const url = mode === 'create'
         ? '/api/articles'
@@ -44,7 +75,7 @@ export default function ArticleForm({ initialValues, mode, formId }: ArticleForm
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -53,11 +84,17 @@ export default function ArticleForm({ initialValues, mode, formId }: ArticleForm
         message.success(mode === 'create' ? '创建成功' : '更新成功');
         router.push('/');
       } else {
-        message.error(result.error || '操作失败');
+        if (response.status === 409 && result.data?.conflict && result.data?.currentArticle) {
+          showConflictModal(result.data.currentArticle);
+        } else {
+          message.error(result.error || '操作失败');
+        }
       }
     } catch (error) {
       console.error('提交失败:', error);
       message.error('操作失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -78,6 +115,7 @@ export default function ArticleForm({ initialValues, mode, formId }: ArticleForm
               createdAt: dayjs(),
             }
       }
+      disabled={readOnly}
     >
       <Form.Item
         label="标题"
@@ -128,7 +166,7 @@ export default function ArticleForm({ initialValues, mode, formId }: ArticleForm
         name="content"
         rules={[{ required: true, message: '请输入内容' }]}
       >
-        <RichTextEditor placeholder="请输入文章内容" />
+        <RichTextEditor placeholder="请输入文章内容" readOnly={readOnly} />
       </Form.Item>
     </Form>
   );

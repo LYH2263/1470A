@@ -15,6 +15,17 @@ export function createMockPrismaClient() {
       deleteMany: vi.fn(),
       count: vi.fn(),
     },
+    articleEditLock: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
+    },
     $transaction: vi.fn(),
   } as unknown as PrismaClient;
 }

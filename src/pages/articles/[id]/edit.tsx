@@ -1,16 +1,78 @@
-import { useEffect, useState } from 'react';
-import { Card, Spin, message, Button, Space } from 'antd';
+import { useEffect, useState, useCallback } from 'react';
+import { Card, Spin, message, Button, Space, Alert, Tag, Modal, Tooltip } from 'antd';
+import { LockOutlined, UnlockOutlined, UserOutlined, WarningOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/zh-cn';
 import ArticleForm from '@/components/articles/ArticleForm';
 import MainLayout from '@/components/layout/MainLayout';
 import type { Article } from '@/types/article';
 import { fetchWithAuth } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useEditLock } from '@/hooks/useEditLock';
+
+dayjs.extend(relativeTime);
+dayjs.locale('zh-cn');
 
 export default function EditArticlePage() {
   const router = useRouter();
   const { id } = router.query;
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [article, setArticle] = useState<Article | null>(null);
+  const [showStealConfirm, setShowStealConfirm] = useState(false);
+
+  const {
+    lockStatus,
+    isLoading: lockLoading,
+    error: lockError,
+    canEdit,
+    currentLock,
+    acquireLock,
+    releaseLock,
+    stealLock,
+    refreshLockStatus,
+  } = useEditLock({
+    articleId: id as string,
+    userId: user?.id || '',
+    userRole: user?.role || '',
+    onLockLost: () => {
+      message.warning('您的编辑权限已丢失');
+    },
+    onLockAcquired: () => {
+      message.success('已获得编辑权限');
+    },
+  });
+
+  const isAdmin = user?.role === 'admin';
+  const isLockedByOther = lockStatus?.isLocked && !lockStatus?.isLockedByMe;
+
+  const handleBack = useCallback(async () => {
+    if (canEdit && article) {
+      await releaseLock();
+    }
+    router.back();
+  }, [canEdit, article, releaseLock, router]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!canEdit) {
+      message.error('您没有编辑权限');
+      return;
+    }
+  }, [canEdit]);
+
+  const handleStealLock = useCallback(async () => {
+    setShowStealConfirm(false);
+    const success = await stealLock();
+    if (success) {
+      setArticle((prev) => prev ? { ...prev } : null);
+    }
+  }, [stealLock]);
+
+  const handleConflict = useCallback((currentArticle: Article) => {
+    console.log('检测到版本冲突，最新文章:', currentArticle);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -36,7 +98,37 @@ export default function EditArticlePage() {
     fetchArticle();
   }, [id]);
 
-  if (loading) {
+  useEffect(() => {
+    if (!article || !user || lockLoading) return;
+
+    const tryAcquireLock = async () => {
+      if (!lockStatus?.isLocked) {
+        const acquired = await acquireLock();
+        if (!acquired) {
+          console.log('无法自动获取锁');
+        }
+      }
+    };
+
+    tryAcquireLock();
+  }, [article, user, lockLoading, lockStatus?.isLocked, acquireLock]);
+
+  useEffect(() => {
+    const handleRouteChange = () => {
+      if (canEdit) {
+        releaseLock();
+      }
+    };
+
+    router.events.on('routeChangeStart', handleRouteChange);
+    return () => {
+      router.events.off('routeChangeStart', handleRouteChange);
+    };
+  }, [canEdit, releaseLock, router.events]);
+
+  const pageLoading = loading || lockLoading;
+
+  if (pageLoading) {
     return (
       <MainLayout>
         <div style={{ padding: '24px', textAlign: 'center' }}>
@@ -56,22 +148,154 @@ export default function EditArticlePage() {
     );
   }
 
+  const renderLockStatus = () => {
+    if (!lockStatus) return null;
+
+    if (lockStatus.isLockedByMe) {
+      return (
+        <Tag color="green" icon={<UnlockOutlined />}>
+          您正在编辑
+        </Tag>
+      );
+    }
+
+    if (isLockedByOther && currentLock) {
+      return (
+        <Space>
+          <Tag color="red" icon={<LockOutlined />}>
+            {currentLock.user.name} 正在编辑
+          </Tag>
+          <Tooltip title={`自 ${dayjs(currentLock.lastHeartbeat).format('HH:mm:ss')} 开始，将在 ${dayjs(currentLock.expiresAt).format('HH:mm:ss')} 过期`}>
+            <Tag icon={<WarningOutlined />}>
+              {dayjs(currentLock.expiresAt).fromNow()} 过期
+            </Tag>
+          </Tooltip>
+        </Space>
+      );
+    }
+
+    return (
+      <Tag color="default" icon={<UnlockOutlined />}>
+        可编辑
+      </Tag>
+    );
+  };
+
+  const renderLockAlert = () => {
+    if (!isLockedByOther || !currentLock) return null;
+
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: '16px' }}
+        message={
+          <Space>
+            <UserOutlined />
+            <span>
+              <strong>{currentLock.user.name}</strong> ({currentLock.user.username}) 正在编辑此文章
+            </span>
+            {isAdmin && (
+              <Button
+                type="primary"
+                danger
+                size="small"
+                onClick={() => setShowStealConfirm(true)}
+              >
+                强制夺锁
+              </Button>
+            )}
+          </Space>
+        }
+        description={
+          <div>
+            <p>您当前处于只读模式，无法保存修改。</p>
+            <p>
+              该锁将在 <strong>{dayjs(currentLock.expiresAt).format('YYYY-MM-DD HH:mm:ss')}</strong> 自动过期
+              （{dayjs(currentLock.expiresAt).fromNow()}）。
+            </p>
+          </div>
+        }
+      />
+    );
+  };
+
   return (
     <MainLayout>
       <div style={{ padding: '24px' }}>
+        {lockError && (
+          <Alert
+            type="error"
+            message={lockError}
+            showIcon
+            style={{ marginBottom: '16px' }}
+            action={
+              <Button size="small" onClick={refreshLockStatus}>
+                重试
+              </Button>
+            }
+          />
+        )}
+
+        {renderLockAlert()}
+
         <Card
-          title="编辑文章"
+          title={
+            <Space>
+              <span>编辑文章</span>
+              {renderLockStatus()}
+            </Space>
+          }
           extra={
             <Space>
-              <Button type="primary" form="article-form" htmlType="submit">
-                保存
-              </Button>
-              <Button onClick={() => router.back()}>返回</Button>
+              {canEdit ? (
+                <Button
+                  type="primary"
+                  form="article-form"
+                  htmlType="submit"
+                  onClick={handleSubmit}
+                >
+                  保存
+                </Button>
+              ) : (
+                isLockedByOther && isAdmin && (
+                  <Button
+                    type="primary"
+                    danger
+                    onClick={() => setShowStealConfirm(true)}
+                  >
+                    强制夺锁
+                  </Button>
+                )
+              )}
+              <Button onClick={handleBack}>返回</Button>
             </Space>
           }
         >
-          <ArticleForm mode="edit" initialValues={article} formId="article-form" />
+          <ArticleForm
+            mode="edit"
+            initialValues={article}
+            formId="article-form"
+            readOnly={!canEdit}
+            onConflict={handleConflict}
+          />
         </Card>
+
+        <Modal
+          title="确认夺锁"
+          open={showStealConfirm}
+          onOk={handleStealLock}
+          onCancel={() => setShowStealConfirm(false)}
+          okText="确认夺锁"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <p>您确定要强制夺锁吗？</p>
+          <p>
+            此操作将导致 <strong>{currentLock?.user.name}</strong> 失去编辑权限，
+            他们未保存的修改可能会丢失。
+          </p>
+        </Modal>
       </div>
     </MainLayout>
   );

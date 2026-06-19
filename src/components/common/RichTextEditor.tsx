@@ -12,19 +12,17 @@ interface RichTextEditorProps {
   value?: string;
   onChange?: (value: string) => void;
   placeholder?: string;
+  readOnly?: boolean;
 }
 
-export default function RichTextEditor({ value = '', onChange, placeholder }: RichTextEditorProps) {
+export default function RichTextEditor({ value = '', onChange, placeholder, readOnly = false }: RichTextEditorProps) {
   const [mounted, setMounted] = useState(false);
 
-  // 确保组件已挂载
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 自定义图片上传处理
   const imageHandler = useCallback(function(this: any) {
-    // 在 handler 中，this 指向 Quill 实例
     const editor = this.quill;
     if (!editor) return;
 
@@ -61,25 +59,26 @@ export default function RichTextEditor({ value = '', onChange, placeholder }: Ri
     };
   }, []);
 
-  // Quill 编辑器配置 - 使用 useMemo 避免每次渲染都重新创建
   const modules = useMemo(
     () => ({
-      toolbar: {
-        container: [
-          [{ header: [1, 2, 3, 4, 5, 6, false] }],
-          ['bold', 'italic', 'underline', 'strike'],
-          [{ list: 'ordered' }, { list: 'bullet' }],
-          [{ color: [] }, { background: [] }],
-          [{ align: [] }],
-          ['link', 'image'],
-          ['clean'],
-        ],
-        handlers: {
-          image: imageHandler,
-        },
-      },
+      toolbar: readOnly
+        ? false
+        : {
+            container: [
+              [{ header: [1, 2, 3, 4, 5, 6, false] }],
+              ['bold', 'italic', 'underline', 'strike'],
+              [{ list: 'ordered' }, { list: 'bullet' }],
+              [{ color: [] }, { background: [] }],
+              [{ align: [] }],
+              ['link', 'image'],
+              ['clean'],
+            ],
+            handlers: {
+              image: imageHandler,
+            },
+          },
     }),
-    [imageHandler]
+    [imageHandler, readOnly]
   );
 
   const formats = useMemo(
@@ -100,7 +99,6 @@ export default function RichTextEditor({ value = '', onChange, placeholder }: Ri
     []
   );
 
-  // 在客户端挂载前不渲染编辑器
   if (!mounted) {
     return (
       <div
@@ -126,10 +124,11 @@ export default function RichTextEditor({ value = '', onChange, placeholder }: Ri
       <ReactQuill
         theme="snow"
         value={value}
-        onChange={onChange}
+        onChange={readOnly ? undefined : onChange}
         modules={modules}
         formats={formats}
         placeholder={placeholder}
+        readOnly={readOnly}
         style={{
           height: `${EDITOR_CONFIG.HEIGHT}px`,
           marginBottom: `${EDITOR_CONFIG.MARGIN_BOTTOM}px`,

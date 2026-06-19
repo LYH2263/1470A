@@ -1,7 +1,7 @@
 import type { NextApiResponse } from 'next';
-import { getArticleById, updateArticle, deleteArticles } from '@/lib/storage';
+import { getArticleById, updateArticle, deleteArticles, updateArticleWithOptimisticLock } from '@/lib/storage';
 import { ArticleSchema } from '@/lib/validation';
-import type { ApiResponse } from '@/types/article';
+import type { ApiResponse, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { withAuth, type AuthenticatedRequest } from '@/lib/middleware';
 
 async function handler(
@@ -50,9 +50,9 @@ async function handler(
       });
     }
   } else if (req.method === 'PUT') {
-    // 更新文章
+    // 更新文章（带乐观锁检测）
     try {
-      const body = req.body;
+      const body = req.body as UpdateArticleWithOptimisticLock;
 
       // 数据验证
       const validationResult = ArticleSchema.safeParse(body);
@@ -63,6 +63,35 @@ async function handler(
         });
       }
 
+      // 如果提供了 lastUpdatedAt，则使用乐观锁
+      if (body.lastUpdatedAt) {
+        const result = await updateArticleWithOptimisticLock(id, body);
+
+        if (result.conflict) {
+          return res.status(409).json({
+            success: false,
+            error: result.error,
+            data: {
+              conflict: true,
+              currentArticle: result.currentArticle,
+            },
+          });
+        }
+
+        if (!result.success) {
+          return res.status(404).json({
+            success: false,
+            error: result.error || '文章不存在',
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: result.article,
+        });
+      }
+
+      // 向后兼容：没有 lastUpdatedAt 时使用原有的更新方式
       const article = await updateArticle(id, validationResult.data);
 
       if (!article) {

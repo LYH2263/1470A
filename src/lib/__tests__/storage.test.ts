@@ -1,12 +1,27 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 import {
   getArticles,
   getArticleById,
   createArticle,
   updateArticle,
   deleteArticles,
+  getLockStatus,
+  acquireLock,
+  renewLock,
+  releaseLock,
+  stealLock,
+  updateArticleWithOptimisticLock,
+  cleanExpiredLocks,
 } from '@/lib/storage';
-import { createMockArticle, createMockArticleFormData, createMockArticles } from '@/test/factories';
+import {
+  createMockArticle,
+  createMockArticleFormData,
+  createMockArticles,
+  createMockArticleEditLock,
+  createMockUser,
+} from '@/test/factories';
+import type { ArticleEditLock, LockOwner } from '@/types/article';
 
 // Mock Prisma Client
 vi.mock('@/lib/prisma', () => ({
@@ -18,6 +33,17 @@ vi.mock('@/lib/prisma', () => ({
       update: vi.fn(),
       deleteMany: vi.fn(),
       count: vi.fn(),
+    },
+    articleEditLock: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
     },
     $transaction: vi.fn(),
   },
@@ -147,6 +173,7 @@ describe('Storage Layer - 数据正确性测试', () => {
       const mockPrismaArticle = {
         ...mockArticle,
         createdAt: new Date(mockArticle.createdAt),
+        updatedAt: new Date(mockArticle.updatedAt),
       };
 
       vi.mocked(prisma.article.findUnique).mockResolvedValue(mockPrismaArticle);
@@ -160,6 +187,7 @@ describe('Storage Layer - 数据正确性测试', () => {
       expect(result?.importance).toBe(mockArticle.importance);
       expect(result?.views).toBe(mockArticle.views);
       expect(result?.content).toBe(mockArticle.content);
+      expect(result?.updatedAt).toBe(mockArticle.updatedAt);
     });
 
     it('应该正确转换日期格式', async () => {
@@ -441,6 +469,7 @@ describe('Storage Layer - 数据正确性测试', () => {
       const mockPrismaArticle = {
         ...mockArticle,
         createdAt: new Date(mockArticle.createdAt),
+        updatedAt: new Date(mockArticle.updatedAt),
       };
 
       vi.mocked(prisma.article.findUnique).mockResolvedValue(mockPrismaArticle);
@@ -454,6 +483,550 @@ describe('Storage Layer - 数据正确性测试', () => {
       expect(typeof result?.importance).toBe('string');
       expect(typeof result?.views).toBe('number');
       expect(typeof result?.content).toBe('string');
+      expect(typeof result?.updatedAt).toBe('string');
+    });
+  });
+
+  describe('getLockStatus - 获取锁状态', () => {
+    it('应该在没有锁时返回未锁定状态', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue(null);
+
+      const result = await getLockStatus(articleId, userId);
+
+      expect(result.isLocked).toBe(false);
+      expect(result.isLockedByMe).toBe(false);
+      expect(result.lock).toBeUndefined();
+    });
+
+    it('应该在有有效锁且是自己时返回正确状态', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const mockUser = createMockUser({ id: userId });
+      const mockLock = createMockArticleEditLock({
+        articleId,
+        userId,
+        user: mockUser,
+      });
+      const mockPrismaLock = {
+        ...mockLock,
+        expiresAt: new Date(mockLock.expiresAt),
+        lastHeartbeat: new Date(mockLock.lastHeartbeat),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user: mockUser,
+      };
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue(mockPrismaLock as any);
+
+      const result = await getLockStatus(articleId, userId);
+
+      expect(result.isLocked).toBe(true);
+      expect(result.isLockedByMe).toBe(true);
+      expect(result.lock).toBeDefined();
+      expect(result.lock?.user.id).toBe(userId);
+    });
+
+    it('应该在有有效锁且是他人时返回正确状态', async () => {
+      const articleId = 'test-article-id';
+      const currentUserId = 'current-user-id';
+      const otherUserId = 'other-user-id';
+      const mockUser = createMockUser({ id: otherUserId });
+      const mockLock = createMockArticleEditLock({
+        articleId,
+        userId: otherUserId,
+        user: mockUser,
+      });
+      const mockPrismaLock = {
+        ...mockLock,
+        expiresAt: new Date(mockLock.expiresAt),
+        lastHeartbeat: new Date(mockLock.lastHeartbeat),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user: mockUser,
+      };
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue(mockPrismaLock as any);
+
+      const result = await getLockStatus(articleId, currentUserId);
+
+      expect(result.isLocked).toBe(true);
+      expect(result.isLockedByMe).toBe(false);
+      expect(result.lock?.user.id).toBe(otherUserId);
+    });
+
+    it('应该自动清理过期锁', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const expiredDate = new Date(Date.now() - 60000);
+      const mockUser = createMockUser({ id: userId });
+      const mockPrismaLock = {
+        id: 'lock-id',
+        articleId,
+        userId,
+        sessionId: 'session-id',
+        expiresAt: expiredDate,
+        lastHeartbeat: expiredDate,
+        createdAt: expiredDate,
+        updatedAt: expiredDate,
+        user: mockUser,
+      };
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue(mockPrismaLock as any);
+      vi.mocked(prisma.articleEditLock.delete).mockResolvedValue({} as any);
+
+      const result = await getLockStatus(articleId, userId);
+
+      expect(result.isLocked).toBe(false);
+      expect(prisma.articleEditLock.delete).toHaveBeenCalled();
+    });
+  });
+
+  describe('acquireLock - 申请锁', () => {
+    it('应该在没有锁时成功申请', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+      const mockArticle = createMockArticle({ id: articleId });
+      const mockUser = createMockUser({ id: userId });
+      const mockLock = createMockArticleEditLock({
+        articleId,
+        userId,
+        sessionId,
+        user: mockUser,
+      });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          articleEditLock: {
+            findUnique: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue({
+              ...mockLock,
+              expiresAt: new Date(mockLock.expiresAt),
+              lastHeartbeat: new Date(mockLock.lastHeartbeat),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              user: mockUser,
+            }),
+          },
+          article: {
+            findUnique: vi.fn().mockResolvedValue({
+              ...mockArticle,
+              createdAt: new Date(mockArticle.createdAt),
+              updatedAt: new Date(mockArticle.updatedAt),
+            }),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await acquireLock(articleId, userId, sessionId);
+
+      expect(result.acquired).toBe(true);
+      expect(result.lock).toBeDefined();
+      expect(result.lock?.articleId).toBe(articleId);
+    });
+
+    it('应该在锁已被其他用户占用时拒绝申请', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+      const otherUserId = 'other-user-id';
+      const mockUser = createMockUser({ id: otherUserId });
+      const existingLock = createMockArticleEditLock({
+        articleId,
+        userId: otherUserId,
+        user: mockUser,
+      });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          articleEditLock: {
+            findUnique: vi.fn().mockResolvedValue({
+              ...existingLock,
+              expiresAt: new Date(existingLock.expiresAt),
+              lastHeartbeat: new Date(existingLock.lastHeartbeat),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              user: mockUser,
+            }),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await acquireLock(articleId, userId, sessionId);
+
+      expect(result.acquired).toBe(false);
+      expect(result.error).toBe('文章已被其他用户占用');
+      expect(result.lock?.user.id).toBe(otherUserId);
+    });
+
+    it('应该在自己已有锁时更新锁', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+      const mockUser = createMockUser({ id: userId });
+      const existingLock = createMockArticleEditLock({
+        articleId,
+        userId,
+        sessionId,
+        user: mockUser,
+      });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          articleEditLock: {
+            findUnique: vi.fn().mockResolvedValue({
+              ...existingLock,
+              expiresAt: new Date(existingLock.expiresAt),
+              lastHeartbeat: new Date(existingLock.lastHeartbeat),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              user: mockUser,
+            }),
+            update: vi.fn().mockResolvedValue({
+              ...existingLock,
+              expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+              lastHeartbeat: new Date(),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              user: mockUser,
+            }),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await acquireLock(articleId, userId, sessionId);
+
+      expect(result.acquired).toBe(true);
+    });
+
+    it('应该在文章不存在时返回错误', async () => {
+      const articleId = 'non-existent-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          articleEditLock: {
+            findUnique: vi.fn().mockResolvedValue(null),
+          },
+          article: {
+            findUnique: vi.fn().mockResolvedValue(null),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await acquireLock(articleId, userId, sessionId);
+
+      expect(result.acquired).toBe(false);
+      expect(result.error).toBe('文章不存在');
+    });
+  });
+
+  describe('renewLock - 心跳续约', () => {
+    it('应该成功续约锁', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+      const mockLock = createMockArticleEditLock({
+        articleId,
+        userId,
+        sessionId,
+      });
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue({
+        ...mockLock,
+        expiresAt: new Date(mockLock.expiresAt),
+        lastHeartbeat: new Date(mockLock.lastHeartbeat),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+      vi.mocked(prisma.articleEditLock.update).mockResolvedValue({} as any);
+
+      const result = await renewLock(articleId, userId, sessionId);
+
+      expect(result.renewed).toBe(true);
+      expect(result.expiresAt).toBeDefined();
+    });
+
+    it('应该在锁不存在时返回错误', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue(null);
+
+      const result = await renewLock(articleId, userId, sessionId);
+
+      expect(result.renewed).toBe(false);
+      expect(result.error).toBe('锁不存在');
+    });
+
+    it('应该在锁已过期时返回错误', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+      const expiredDate = new Date(Date.now() - 60000);
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue({
+        id: 'lock-id',
+        articleId,
+        userId,
+        sessionId,
+        expiresAt: expiredDate,
+        lastHeartbeat: expiredDate,
+      } as any);
+      vi.mocked(prisma.articleEditLock.delete).mockResolvedValue({} as any);
+
+      const result = await renewLock(articleId, userId, sessionId);
+
+      expect(result.renewed).toBe(false);
+      expect(result.error).toBe('锁已过期');
+    });
+
+    it('应该在用户不匹配时拒绝续约', async () => {
+      const articleId = 'test-article-id';
+      const currentUserId = 'current-user-id';
+      const lockUserId = 'lock-user-id';
+      const sessionId = 'session-id';
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue({
+        id: 'lock-id',
+        articleId,
+        userId: lockUserId,
+        sessionId,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        lastHeartbeat: new Date(),
+      } as any);
+
+      const result = await renewLock(articleId, currentUserId, sessionId);
+
+      expect(result.renewed).toBe(false);
+      expect(result.error).toBe('无权限续约此锁');
+    });
+  });
+
+  describe('releaseLock - 释放锁', () => {
+    it('应该成功释放锁', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue({
+        id: 'lock-id',
+        articleId,
+        userId,
+        sessionId,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        lastHeartbeat: new Date(),
+      } as any);
+      vi.mocked(prisma.articleEditLock.delete).mockResolvedValue({} as any);
+
+      const result = await releaseLock(articleId, userId, sessionId);
+
+      expect(result.released).toBe(true);
+    });
+
+    it('应该在锁不存在时返回成功', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'test-user-id';
+      const sessionId = 'session-id';
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue(null);
+
+      const result = await releaseLock(articleId, userId, sessionId);
+
+      expect(result.released).toBe(true);
+    });
+
+    it('应该在用户不匹配时拒绝释放', async () => {
+      const articleId = 'test-article-id';
+      const currentUserId = 'current-user-id';
+      const lockUserId = 'lock-user-id';
+      const sessionId = 'session-id';
+
+      vi.mocked(prisma.articleEditLock.findUnique).mockResolvedValue({
+        id: 'lock-id',
+        articleId,
+        userId: lockUserId,
+        sessionId,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        lastHeartbeat: new Date(),
+      } as any);
+
+      const result = await releaseLock(articleId, currentUserId, sessionId);
+
+      expect(result.released).toBe(false);
+      expect(result.error).toBe('无权限释放此锁');
+    });
+  });
+
+  describe('stealLock - 强制夺锁', () => {
+    it('应该在管理员时成功夺锁', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'admin-user-id';
+      const sessionId = 'session-id';
+      const isAdmin = true;
+      const mockUser = createMockUser({ id: userId, role: 'admin' });
+      const mockLock = createMockArticleEditLock({
+        articleId,
+        userId,
+        user: mockUser,
+      });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          articleEditLock: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'existing-lock-id',
+              articleId,
+              userId: 'other-user-id',
+              sessionId: 'other-session-id',
+            }),
+            delete: vi.fn().mockResolvedValue({}),
+            create: vi.fn().mockResolvedValue({
+              ...mockLock,
+              expiresAt: new Date(mockLock.expiresAt),
+              lastHeartbeat: new Date(mockLock.lastHeartbeat),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              user: mockUser,
+            }),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await stealLock(articleId, userId, sessionId, isAdmin);
+
+      expect(result.stolen).toBe(true);
+      expect(result.lock).toBeDefined();
+    });
+
+    it('应该在非管理员时拒绝夺锁', async () => {
+      const articleId = 'test-article-id';
+      const userId = 'regular-user-id';
+      const sessionId = 'session-id';
+      const isAdmin = false;
+
+      const result = await stealLock(articleId, userId, sessionId, isAdmin);
+
+      expect(result.stolen).toBe(false);
+      expect(result.error).toBe('只有管理员可以强制夺锁');
+    });
+  });
+
+  describe('updateArticleWithOptimisticLock - 带乐观锁更新', () => {
+    it('应该在版本匹配时成功更新', async () => {
+      const id = 'test-article-id';
+      const now = new Date();
+      const formData = createMockArticleFormData({ title: '更新后的标题' });
+      const mockArticle = createMockArticle({ id, ...formData });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          article: {
+            findUnique: vi.fn().mockResolvedValue({
+              ...mockArticle,
+              createdAt: new Date(mockArticle.createdAt),
+              updatedAt: now,
+            }),
+            update: vi.fn().mockResolvedValue({
+              ...mockArticle,
+              createdAt: new Date(mockArticle.createdAt),
+              updatedAt: new Date(),
+            }),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await updateArticleWithOptimisticLock(id, {
+        ...formData,
+        lastUpdatedAt: now.toISOString(),
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.article).toBeDefined();
+      expect(result.conflict).toBeUndefined();
+    });
+
+    it('应该在版本不匹配时返回冲突', async () => {
+      const id = 'test-article-id';
+      const dbUpdatedAt = new Date();
+      const clientUpdatedAt = new Date(dbUpdatedAt.getTime() - 5000);
+      const formData = createMockArticleFormData({ title: '更新后的标题' });
+      const mockArticle = createMockArticle({ id, ...formData });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          article: {
+            findUnique: vi.fn().mockResolvedValue({
+              ...mockArticle,
+              createdAt: new Date(mockArticle.createdAt),
+              updatedAt: dbUpdatedAt,
+            }),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await updateArticleWithOptimisticLock(id, {
+        ...formData,
+        lastUpdatedAt: clientUpdatedAt.toISOString(),
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.conflict).toBe(true);
+      expect(result.error).toBe('文章已被其他用户修改，请刷新后重试');
+      expect(result.currentArticle).toBeDefined();
+    });
+
+    it('应该在文章不存在时返回错误', async () => {
+      const id = 'non-existent-id';
+      const formData = createMockArticleFormData();
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
+        const tx = {
+          article: {
+            findUnique: vi.fn().mockResolvedValue(null),
+          },
+        };
+        return fn(tx);
+      });
+
+      const result = await updateArticleWithOptimisticLock(id, {
+        ...formData,
+        lastUpdatedAt: new Date().toISOString(),
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('文章不存在');
+    });
+  });
+
+  describe('cleanExpiredLocks - 清理过期锁', () => {
+    it('应该删除所有过期锁', async () => {
+      vi.mocked(prisma.articleEditLock.deleteMany).mockResolvedValue({ count: 3 });
+
+      const result = await cleanExpiredLocks();
+
+      expect(result).toBe(3);
+      expect(prisma.articleEditLock.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            expiresAt: {
+              lt: expect.any(Date),
+            },
+          },
+        })
+      );
     });
   });
 });

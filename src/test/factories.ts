@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Article, ArticleFormData } from '@/types/article';
+import type { Article, ArticleFormData, ArticleEditLock, LockOwner } from '@/types/article';
 
 /**
  * 创建测试用的文章数据
@@ -16,6 +16,7 @@ export function createMockArticle(overrides?: Partial<Article>): Article {
     importance: 'medium',
     views: 0,
     content: '<p>这是测试内容</p>',
+    updatedAt: now,
     ...overrides,
   };
 }
@@ -49,6 +50,38 @@ export function createMockArticles(count: number): Article[] {
       views: index * 10,
     })
   );
+}
+
+/**
+ * 创建测试用户
+ */
+export function createMockUser(overrides?: Partial<LockOwner>): LockOwner {
+  return {
+    id: uuidv4(),
+    username: 'testuser',
+    name: '测试用户',
+    role: 'admin',
+    ...overrides,
+  };
+}
+
+/**
+ * 创建测试编辑锁
+ */
+export function createMockArticleEditLock(overrides?: Partial<ArticleEditLock>): ArticleEditLock {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+
+  return {
+    id: uuidv4(),
+    articleId: uuidv4(),
+    userId: uuidv4(),
+    sessionId: uuidv4(),
+    expiresAt: expiresAt.toISOString(),
+    lastHeartbeat: now.toISOString(),
+    user: createMockUser(),
+    ...overrides,
+  };
 }
 
 /**
