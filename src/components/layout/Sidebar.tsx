@@ -1,5 +1,5 @@
 import { Layout, Menu } from 'antd';
-import { FileTextOutlined, DashboardOutlined, SafetyOutlined } from '@ant-design/icons';
+import { FileTextOutlined, DashboardOutlined, SafetyOutlined, CloudServerOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import type { MenuProps } from 'antd';
 
@@ -24,6 +24,11 @@ export default function Sidebar() {
       key: '/sensitive-words',
       icon: <SafetyOutlined />,
       label: '敏感词管理',
+    },
+    {
+      key: '/backup',
+      icon: <CloudServerOutlined />,
+      label: '备份恢复',
     },
   ];
 

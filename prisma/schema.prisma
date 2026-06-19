@@ -77,17 +77,17 @@ model SensitiveWord {
 
 model BatchOperationLog {
   id              String   @id @default(uuid())
-  operationType   String   // batch_update_author, batch_update_importance, batch_append_footer, batch_replace_content, batch_delete
+  operationType   String
   operatorId      String
   operatorName    String
-  articleIds      String   // JSON string array
+  articleIds      String
   articleCount    Int
-  params          String   // JSON string, operation parameters
-  snapshots       String   // JSON string, article snapshots before operation for undo
-  status          String   // success, partial_failure, failed
+  params          String
+  snapshots       String
+  status          String
   successCount    Int      @default(0)
   failureCount    Int      @default(0)
-  errorDetails    String?  // JSON string, error details per article
+  errorDetails    String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   reverted        Boolean  @default(false)
@@ -97,4 +97,45 @@ model BatchOperationLog {
   @@index([operatorId])
   @@index([createdAt])
   @@index([status])
+}
+
+model BackupRecord {
+  id              String   @id @default(uuid())
+  type            String   // manual, scheduled, snapshot
+  status          String   // creating, completed, failed, restoring, restored
+  filename        String
+  fileSize        Int      @default(0)
+  dbPath          String
+  uploadsMetaJson String   @default("{}")
+  articleCount    Int      @default(0)
+  operatorId      String?
+  operatorName    String?
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BackupSchedule {
+  id              String   @id @default(uuid())
+  enabled         Boolean  @default(true)
+  cronExpression  String   @default("0 2 * * *")
+  retentionDays   Int      @default(7)
+  retentionCount  Int      @default(10)
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model SystemConfig {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
 }

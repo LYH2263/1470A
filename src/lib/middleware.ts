@@ -75,3 +75,18 @@ export function withAuth(handler: ApiHandler): ApiHandler {
     }
   };
 }
+
+export function withAdmin(handler: ApiHandler): ApiHandler {
+  return withAuth(async (req: AuthenticatedRequest, res: NextApiResponse) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: '仅管理员可执行此操作',
+        },
+      });
+    }
+    return handler(req, res);
+  });
+}
