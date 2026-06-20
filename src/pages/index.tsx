@@ -268,7 +268,7 @@ export default function ArticlesPage() {
       key: 'importance',
       width: 100,
       render: (importance: 'low' | 'medium' | 'high') => {
-        const config = importanceMap[importance];
+        const config = importanceMap[importance] ?? importanceMap.medium;
         return <Tag color={config.color}>{config.label}</Tag>;
       },
     },

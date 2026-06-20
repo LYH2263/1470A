@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
-import { stripHtml, tokenizeChinese, searchArticles } from './search';
+import { stripHtml, tokenizeChinese } from './html-utils';
+import { searchArticles } from './search';
 import { safeReplaceContent, checkHtmlStructureSafety, sanitizeHtmlContent } from './batch-utils';
 import type {
   Article,

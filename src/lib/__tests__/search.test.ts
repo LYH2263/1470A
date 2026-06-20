@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripHtml, tokenizeChinese, buildFtsQuery } from '@/lib/search';
+import { stripHtml, tokenizeChinese, buildFtsQuery } from '@/lib/html-utils';
 
 describe('stripHtml - HTML标签剥离', () => {
   it('应该移除基本的HTML标签', () => {

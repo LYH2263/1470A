@@ -1,0 +1,37 @@
+﻿# 依赖与包管理缓存（pnpm 内容寻址存储，文件极多）
+node_modules/
+.pnpm-store/
+**/.pnpm/
+node_modules/.ignored/
+node_modules/.cache/
+
+# 构建产物
+.next/
+out/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# 运行时数据
+data/
+public/uploads/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# 测试产物
+coverage/
+test-results/
+playwright-report/
+.playwright-mcp/
+
+# 环境与 IDE
+.env*
+.cursor/
+.idea/
+
+# 本地文档
+对话/
+1470A/

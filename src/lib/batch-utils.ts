@@ -1,4 +1,4 @@
-import { stripHtml } from './search';
+import { stripHtml } from './html-utils';
 import DOMPurify from 'isomorphic-dompurify';
 import { configureDOMPurify } from './utils';
 

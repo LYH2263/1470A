@@ -1,4 +1,4 @@
-import { stripHtml } from './search';
+import { stripHtml } from './html-utils';
 import type {
   SensitiveWord,
   SensitiveWordMatch,

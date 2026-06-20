@@ -1,8 +1,13 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+**/.pnpm/
+node_modules/.ignored/
+node_modules/.cache/
+.pnpm-store/
+**/.pnpm-store/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,21 +15,31 @@
 !.yarn/releases
 !.yarn/versions
 
+# other package managers
+package-lock.json
+yarn.lock
+
 # testing
-/coverage
+coverage/
 /test-results/
 /playwright-report/
 /playwright/.cache/
+.playwright-mcp/
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build/
+dist/
+.turbo/
 
 # uploads
-/public/uploads/
+public/uploads/
+
+# runtime data (Docker volume)
+data/
 
 # database
 *.db
@@ -34,6 +49,7 @@
 
 # misc
 .DS_Store
+Thumbs.db
 *.pem
 
 # debug
@@ -62,3 +78,12 @@ next-env.d.ts
 
 # AI 对话历史
 prisma/CONVERSATION_HISTORY.jsonl
+
+# 误生成的嵌套目录
+1470A/
+
+# IDE（保留团队共享的编辑器配置）
+.idea/
+.cursor/
+.vscode/*
+!.vscode/settings.json

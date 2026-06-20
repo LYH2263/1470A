@@ -1,28 +1,56 @@
+# Git / 版本控制
+.git/
+.gitignore
+.github/
+
 # Node.js
 node_modules/
+node_modules/.ignored/
+node_modules/.cache/
+**/.pnpm/
+.pnpm-store/
+**/.pnpm-store/
+.pnp
+.pnp.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+package-lock.json
 
 # Next.js
 .next/
 out/
 build/
 dist/
+.turbo/
+tsconfig.tsbuildinfo
+next-env.d.ts
 
 # 环境变量
 .env
 .env*.local
 .env.production
+.env.example
 
 # 测试
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
+.playwright-mcp/
+e2e/
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+vitest.config.ts
+playwright.config.ts
 
-# IDE
+# IDE / 编辑器
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
@@ -31,11 +59,15 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# 数据库
+# 数据库与运行时数据
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
+data/
 prisma/dev.db
 prisma/dev.db-journal
+prisma/CONVERSATION_HISTORY.jsonl
 
 # 日志
 *.log
@@ -49,10 +81,17 @@ temp/
 # 上传文件
 public/uploads/
 
-# Playwright
-.playwright-mcp/
-test-results/
-playwright-report/
+# Docker / 部署（构建镜像不需要）
+docker-compose.yml
+docker-init.sh
+docker-verify.sh
+nginx/
 
-# 其他
-.turbo/
+# Git hooks
+.husky/
+
+# 本地文档与对话记录
+*.md
+!README.md
+对话/
+1470A/

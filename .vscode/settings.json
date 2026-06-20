@@ -1,0 +1,28 @@
+{
+  "files.exclude": {
+    "**/.pnpm-store": true,
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/data": true,
+    "**/coverage": true,
+    "**/test-results": true,
+    "**/playwright-report": true,
+    "**/.turbo": true,
+    "**/1470A": true
+  },
+  "search.exclude": {
+    "**/.pnpm-store": true,
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/data": true,
+    "**/coverage": true
+  },
+  "files.watcherExclude": {
+    "**/.pnpm-store/**": true,
+    "**/node_modules/**": true,
+    "**/.next/**": true,
+    "**/data/**": true,
+    "**/coverage/**": true
+  },
+  "git.ignoreLimitWarning": true
+}
