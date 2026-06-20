@@ -29,6 +29,7 @@ import { formatDate } from '@/lib/utils';
 interface BatchOperationCenterProps {
   open: boolean;
   selectedIds: React.Key[];
+  defaultTab?: OperationTabKey;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -38,10 +39,11 @@ type OperationTabKey = 'author' | 'importance' | 'footer' | 'replace';
 export default function BatchOperationCenter({
   open,
   selectedIds,
+  defaultTab = 'author',
   onClose,
   onSuccess,
 }: BatchOperationCenterProps) {
-  const [activeTab, setActiveTab] = useState<OperationTabKey>('author');
+  const [activeTab, setActiveTab] = useState<OperationTabKey>(defaultTab);
   const [loading, setLoading] = useState(false);
   const [previewResult, setPreviewResult] = useState<BatchPreviewResult | null>(null);
   const [showPreview, setShowPreview] = useState(false);
@@ -370,6 +372,9 @@ export default function BatchOperationCenter({
       destroyOnClose
       afterOpenChange={(isOpen) => {
         if (isOpen) {
+          setActiveTab(defaultTab);
+          setPreviewResult(null);
+          setShowPreview(false);
           fetchLatestOperation();
         }
       }}

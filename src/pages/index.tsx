@@ -24,6 +24,7 @@ export default function ArticlesPage() {
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [batchDefaultTab, setBatchDefaultTab] = useState<'author' | 'importance' | 'footer' | 'replace'>('author');
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState<string | undefined | null>(undefined);
   const [includeDrafts, setIncludeDrafts] = useState(false);
@@ -429,22 +430,22 @@ export default function ArticlesPage() {
                     {
                       key: 'update-author',
                       label: '批量改作者',
-                      onClick: () => setBatchModalOpen(true),
+                      onClick: () => { setBatchDefaultTab('author'); setBatchModalOpen(true); },
                     },
                     {
                       key: 'update-importance',
                       label: '批量改重要性',
-                      onClick: () => setBatchModalOpen(true),
+                      onClick: () => { setBatchDefaultTab('importance'); setBatchModalOpen(true); },
                     },
                     {
                       key: 'append-footer',
                       label: '追加页脚声明',
-                      onClick: () => setBatchModalOpen(true),
+                      onClick: () => { setBatchDefaultTab('footer'); setBatchModalOpen(true); },
                     },
                     {
                       key: 'replace-content',
                       label: '替换正文片段',
-                      onClick: () => setBatchModalOpen(true),
+                      onClick: () => { setBatchDefaultTab('replace'); setBatchModalOpen(true); },
                     },
                     {
                       type: 'divider',
@@ -489,6 +490,7 @@ export default function ArticlesPage() {
       <BatchOperationCenter
         open={batchModalOpen}
         selectedIds={selectedRowKeys}
+        defaultTab={batchDefaultTab}
         onClose={() => setBatchModalOpen(false)}
         onSuccess={() => {
           setSelectedRowKeys([]);
