@@ -4,6 +4,7 @@ import type {
   SensitiveWordMatch,
   SensitiveWordDetectionResult,
   HighlightSegment,
+  QuillHighlightRange,
 } from '@/types/sensitive-word';
 import { SENSITIVE_WORD_DEFAULTS } from '@/types/sensitive-word';
 
@@ -318,17 +319,12 @@ export class SensitiveWordDetector {
     return result;
   }
 
-  getQuillHighlightRanges(html: string, matches: SensitiveWordMatch[]): Array<{
-    index: number;
-    length: number;
-    level: string;
-    word: string;
-  }> {
+  getQuillHighlightRanges(html: string, matches: SensitiveWordMatch[]): QuillHighlightRange[] {
     if (matches.length === 0) return [];
     const { plainToQuillMap } = buildHtmlPositionMap(html);
     const sorted = [...matches].sort((a, b) => a.start - b.start);
 
-    const ranges: Array<{ index: number; length: number; level: string; word: string }> = [];
+    const ranges: QuillHighlightRange[] = [];
     for (const match of sorted) {
       const quillStart = plainToQuillMap[match.start];
       const quillEnd = plainToQuillMap[match.end];

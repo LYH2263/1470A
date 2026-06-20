@@ -612,7 +612,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
           readOnly={readOnly}
           onChange={handleContentChange}
           onEditorReady={(api) => setEditorApi(api)}
-          highlightRanges={contentHighlightRanges as any}
+          highlightRanges={contentHighlightRanges}
         />
       </Form.Item>
     </Form>

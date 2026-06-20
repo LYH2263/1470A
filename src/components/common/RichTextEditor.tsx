@@ -13,6 +13,8 @@ import {
 import 'react-quill/dist/quill.snow.css';
 import 'highlight.js/styles/github.css';
 
+import type { QuillHighlightRange } from '@/types/sensitive-word';
+
 const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
 
 interface RichTextEditorProps {
@@ -21,24 +23,14 @@ interface RichTextEditorProps {
   placeholder?: string;
   readOnly?: boolean;
   height?: number;
-  highlightRanges?: Array<{
-    index: number;
-    length: number;
-    level: string;
-    word: string;
-  }>;
+  highlightRanges?: QuillHighlightRange[];
   onEditorReady?: (api: RichTextEditorApi) => void;
 }
 
 export interface RichTextEditorApi {
   getQuill: () => any;
   getInnerHTML: () => string;
-  setSensitiveHighlights: (ranges: Array<{
-    index: number;
-    length: number;
-    level: string;
-    word: string;
-  }>) => void;
+  setSensitiveHighlights: (ranges: QuillHighlightRange[]) => void;
   clearSensitiveHighlights: () => void;
   scrollToRange: (index: number, length: number) => void;
 }
@@ -295,7 +287,7 @@ export default function RichTextEditor({
   }, []);
 
   const applySensitiveHighlights = useCallback((
-    ranges: Array<{ index: number; length: number; level: string; word: string }>
+    ranges: QuillHighlightRange[]
   ) => {
     const quill = quillInstanceRef.current;
     if (!quill) return;
