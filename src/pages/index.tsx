@@ -148,12 +148,13 @@ export default function ArticlesPage() {
       content: '确定要删除这篇文章吗？',
       onOk: async () => {
         try {
+          const status = includeDrafts ? undefined : 'published';
           const response = await fetchWithAuth('/api/articles', {
             method: 'DELETE',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ ids: [id] }),
+            body: JSON.stringify({ ids: [id], status }),
           });
 
           const result = await response.json();
@@ -183,12 +184,13 @@ export default function ArticlesPage() {
       content: `确定要删除选中的 ${selectedRowKeys.length} 篇文章吗？`,
       onOk: async () => {
         try {
+          const status = includeDrafts ? undefined : 'published';
           const response = await fetchWithAuth('/api/articles', {
             method: 'DELETE',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ ids: selectedRowKeys }),
+            body: JSON.stringify({ ids: selectedRowKeys, status }),
           });
 
           const result = await response.json();

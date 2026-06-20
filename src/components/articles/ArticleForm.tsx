@@ -498,7 +498,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
             }
           : {
               importance: 'medium',
-              status: 'published',
+              status: 'draft',
               createdAt: dayjs(),
             }
       }

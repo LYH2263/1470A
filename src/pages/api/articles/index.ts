@@ -196,11 +196,27 @@ async function handler(
         });
       }
 
-      const deletedCount = await deleteArticles(validIds, status);
+      // 校验状态参数
+      let filteredStatus: 'draft' | 'published' | undefined;
+      if (status !== undefined && status !== null) {
+        if (status !== 'draft' && status !== 'published') {
+          return res.status(400).json({
+            success: false,
+            error: '无效的状态参数，只能是 draft 或 published',
+          });
+        }
+        filteredStatus = status;
+      }
+
+      const deletedCount = await deleteArticles(validIds, filteredStatus);
 
       return res.status(200).json({
         success: true,
-        data: { deletedCount },
+        data: {
+          deletedCount,
+          requestedCount: validIds.length,
+          status: filteredStatus || 'all',
+        },
       });
     } catch (error) {
       console.error('删除文章失败:', error);

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card, Spin, message, Button, Space, Alert, Tag, Modal, Tooltip, Skeleton } from 'antd';
-import { LockOutlined, UnlockOutlined, UserOutlined, WarningOutlined } from '@ant-design/icons';
+import { LockOutlined, UnlockOutlined, UserOutlined, WarningOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -262,13 +262,25 @@ export default function EditArticlePage() {
           {lockLoading ? (
             <Skeleton active paragraph={{ rows: 8 }} />
           ) : (
-            <ArticleForm
-              mode="edit"
-              initialValues={article}
-              formId="article-form"
-              readOnly={!canEdit}
-              onConflict={handleConflict}
-            />
+            <>
+              {article.status === 'draft' && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  icon={<FileTextOutlined />}
+                  style={{ marginBottom: '16px' }}
+                  message="当前为草稿状态"
+                  description="此文章尚未发布，仅您可见。请在状态字段中选择「已发布」以正式发布。"
+                />
+              )}
+              <ArticleForm
+                mode="edit"
+                initialValues={article}
+                formId="article-form"
+                readOnly={!canEdit}
+                onConflict={handleConflict}
+              />
+            </>
           )}
         </Card>
 
