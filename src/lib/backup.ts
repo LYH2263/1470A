@@ -1,7 +1,8 @@
 import { copyFile, mkdir, readdir, stat, unlink, readFile, writeFile, access, rename } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { prisma } from './prisma';
+import { prisma, resetPrismaClient } from './prisma';
+import { getMaintenanceMode, setMaintenanceMode as setSysMaintenanceMode } from './system-status';
 
 const BACKUP_DIR = path.join(process.cwd(), 'data', 'backups');
 const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads');
@@ -200,6 +201,7 @@ export async function restoreFromBackup(
   success: boolean;
   snapshotId?: string;
   error?: string;
+  needsReload?: boolean;
 }> {
   const validation = await validateBackupFile(backupFilePath);
   if (!validation.valid) {
@@ -227,7 +229,13 @@ export async function restoreFromBackup(
     await mkdir(UPLOADS_DIR, { recursive: true });
   }
 
-  return { success: true, snapshotId };
+  try {
+    await resetPrismaClient();
+  } catch (err) {
+    console.warn('重置 Prisma 连接失败:', err);
+  }
+
+  return { success: true, snapshotId, needsReload: true };
 }
 
 export async function listBackupRecords(options?: {
@@ -404,15 +412,14 @@ export async function updateScheduleConfig(data: {
 }
 
 export async function isMaintenanceMode(): Promise<boolean> {
-  const config = await prisma.systemConfig.findUnique({ where: { key: 'maintenance_mode' } });
-  return config?.value === 'true';
+  const mode = await getMaintenanceMode();
+  return mode.enabled;
 }
 
-export async function setMaintenanceMode(enabled: boolean): Promise<void> {
-  await prisma.systemConfig.upsert({
-    where: { key: 'maintenance_mode' },
-    update: { value: String(enabled) },
-    create: { key: 'maintenance_mode', value: String(enabled) },
+export async function setMaintenanceMode(enabled: boolean, message?: string): Promise<void> {
+  await setSysMaintenanceMode({
+    enabled,
+    ...(message !== undefined && { message }),
   });
 }
 

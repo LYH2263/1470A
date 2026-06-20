@@ -1,6 +1,7 @@
 import type { NextApiResponse } from 'next';
 import { withAuth, type AuthenticatedRequest } from '@/lib/middleware';
 import { getBackupStats } from '@/lib/backup';
+import { initBackupScheduler } from '@/lib/backup-scheduler';
 
 export default withAuth(async function handler(
   req: AuthenticatedRequest,
@@ -11,6 +12,7 @@ export default withAuth(async function handler(
   }
 
   try {
+    initBackupScheduler();
     const stats = await getBackupStats();
     return res.status(200).json({
       success: true,

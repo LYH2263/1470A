@@ -134,7 +134,34 @@ function BackupCenterPage() {
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
   const [scheduleForm] = Form.useForm();
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [filterType, setFilterType] = useState<string | undefined>(undefined);
+  const [reloadModalVisible, setReloadModalVisible] = useState(false);
+  const [schedulerStatus, setSchedulerStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
+
+  useEffect(() => {
+    let pollTimer: NodeJS.Timeout | null = null;
+
+    const pollMaintenance = async () => {
+      try {
+        const res = await fetchWithAuth('/api/system/status');
+        const data = await res.json();
+        if (data.success) {
+          setMaintenanceMode(data.data.maintenance.enabled);
+          setMaintenanceMessage(data.data.maintenance.message || '');
+        }
+      } catch {
+        // ignore poll errors
+      }
+    };
+
+    pollMaintenance();
+    pollTimer = setInterval(pollMaintenance, 5000);
+
+    return () => {
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
 
   const fetchStats = async () => {
     try {
@@ -269,6 +296,9 @@ function BackupCenterPage() {
         message.success('数据恢复成功');
         setRestoreModalVisible(false);
         setRestoreFile(null);
+        if (data.data?.needsReload) {
+          setReloadModalVisible(true);
+        }
         fetchRecords();
         fetchStats();
       } else {
@@ -283,7 +313,7 @@ function BackupCenterPage() {
 
   const handleToggleMaintenance = async (enabled: boolean) => {
     try {
-      const res = await fetchWithAuth('/api/backup/maintenance', {
+      const res = await fetchWithAuth('/api/maintenance', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
@@ -291,10 +321,11 @@ function BackupCenterPage() {
       const data = await res.json();
       if (data.success) {
         setMaintenanceMode(enabled);
+        setMaintenanceMessage(data.data.message || '');
         message.success(enabled ? '已进入维护模式' : '已退出维护模式');
         fetchStats();
       } else {
-        message.error(data.error || '操作失败');
+        message.error(data.error?.message || '操作失败');
       }
     } catch (error: any) {
       message.error('操作失败');
@@ -484,7 +515,7 @@ function BackupCenterPage() {
         {maintenanceMode && (
           <Alert
             message="系统维护中"
-            description="系统当前处于维护模式，所有写入操作已被中断。请在完成恢复操作后关闭维护模式。"
+            description={maintenanceMessage || '系统当前处于维护模式，所有写入操作已被中断。请在完成恢复操作后关闭维护模式。'}
             type="warning"
             showIcon
             closable={false}
@@ -648,10 +679,11 @@ function BackupCenterPage() {
                           message="使用说明"
                           description={
                             <ul style={{ margin: 0, paddingLeft: 20 }}>
-                              <li>定时备份需要在服务端配置 cron 任务调用脚本</li>
+                              <li>内建调度器会根据配置自动执行定时备份</li>
                               <li>Cron 表达式格式：分 时 日 月 周（如 0 2 * * * 表示每天凌晨 2 点）</li>
                               <li>超出保留天数的定时备份将被自动清理</li>
                               <li>清理时至少保留指定份数的备份</li>
+                              <li>调度器在访问本页面后自动启动</li>
                             </ul>
                           }
                           type="info"
@@ -753,6 +785,32 @@ function BackupCenterPage() {
               <InputNumber min={1} max={100} style={{ width: '100%' }} />
             </Form.Item>
           </Form>
+        </Modal>
+
+        <Modal
+          title="恢复完成"
+          open={reloadModalVisible}
+          onOk={() => window.location.reload()}
+          onCancel={() => setReloadModalVisible(false)}
+          okText="立即刷新"
+          cancelText="稍后刷新"
+          okButtonProps={{ type: 'primary' }}
+          maskClosable={false}
+          closable={false}
+        >
+          <Alert
+            message="数据恢复成功"
+            description={
+              <div>
+                <p>数据库已恢复到备份状态，已自动创建恢复前快照。</p>
+                <p style={{ marginBottom: 0 }}>
+                  <strong>为确保数据一致性，请刷新页面后再进行操作。</strong>
+                </p>
+              </div>
+            }
+            type="success"
+            showIcon
+          />
         </Modal>
       </div>
     </MainLayout>

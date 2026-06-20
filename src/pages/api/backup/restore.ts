@@ -83,6 +83,7 @@ export default withAdmin(async function handler(
         data: {
           snapshotId: result.snapshotId,
           message: '数据恢复成功',
+          needsReload: result.needsReload,
         },
       });
     } finally {
