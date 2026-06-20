@@ -36,7 +36,7 @@ async function handler(
     });
   }
 
-  if (req.method !== 'POST' && req.method !== 'GET') {
+  if (req.method !== 'POST') {
     return res.status(405).json({
       success: false,
       error: 'Method Not Allowed',
@@ -71,26 +71,20 @@ async function handler(
     let exportConfig: ExportConfig = { ...DEFAULT_EXPORT_CONFIG };
     let shouldDownload = true;
 
-    if (req.method === 'POST') {
-      const body = req.body as HtmlExportBody;
-      if (body.config) {
-        exportConfig = {
-          ...DEFAULT_EXPORT_CONFIG,
-          ...body.config,
-          header: { ...DEFAULT_EXPORT_CONFIG.header, ...(body.config.header || {}) },
-          footer: { ...DEFAULT_EXPORT_CONFIG.footer, ...(body.config.footer || {}) },
-          cover: { ...DEFAULT_EXPORT_CONFIG.cover, ...(body.config.cover || {}) },
-          watermark: { ...DEFAULT_EXPORT_CONFIG.watermark, ...(body.config.watermark || {}) },
-          margin: body.config.margin || DEFAULT_EXPORT_CONFIG.margin,
-        };
-      }
-      if (typeof body.download === 'boolean') {
-        shouldDownload = body.download;
-      }
-    } else if (req.method === 'GET') {
-      if (req.query.preview === '1' || req.query.preview === 'true') {
-        shouldDownload = false;
-      }
+    const body = req.body as HtmlExportBody;
+    if (body.config) {
+      exportConfig = {
+        ...DEFAULT_EXPORT_CONFIG,
+        ...body.config,
+        header: { ...DEFAULT_EXPORT_CONFIG.header, ...(body.config.header || {}) },
+        footer: { ...DEFAULT_EXPORT_CONFIG.footer, ...(body.config.footer || {}) },
+        cover: { ...DEFAULT_EXPORT_CONFIG.cover, ...(body.config.cover || {}) },
+        watermark: { ...DEFAULT_EXPORT_CONFIG.watermark, ...(body.config.watermark || {}) },
+        margin: body.config.margin || DEFAULT_EXPORT_CONFIG.margin,
+      };
+    }
+    if (typeof body.download === 'boolean') {
+      shouldDownload = body.download;
     }
 
     const { html } = buildExportTemplate(

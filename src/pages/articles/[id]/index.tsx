@@ -88,41 +88,28 @@ export default function ArticleDetailPage() {
         ? `/api/articles/${id}/export/pdf`
         : `/api/articles/${id}/export/html`;
 
-      if (type === 'html' && !download) {
-        const token = localStorage.getItem('auth_token');
-        const formHtml = `
-          <form id="export-form" method="POST" action="${endpoint}" target="_blank">
-            <input type="hidden" name="config" value='${JSON.stringify(exportConfig).replace(/'/g, "&#39;")}'>
-            <input type="hidden" name="download" value="false">
-          </form>
-          <script>
-            (function() {
-              const form = document.getElementById('export-form');
-              const input = document.createElement('input');
-              input.name = 'Authorization';
-              input.value = 'Bearer ${token || ''}';
-              form.appendChild(input);
-              form.submit();
-            })();
-          </script>
-        `;
-        const win = window.open('', '_blank');
-        if (win) {
-          win.document.write(formHtml);
-          win.document.close();
-        }
-        return;
-      }
-
       const response = await fetchWithAuth(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: exportConfig, download: true }),
+        body: JSON.stringify({ config: exportConfig, download }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `导出失败 (${response.status})`);
+      }
+
+      if (type === 'html' && !download) {
+        const htmlContent = await response.text();
+        const win = window.open('', '_blank');
+        if (win) {
+          win.document.open();
+          win.document.write(htmlContent);
+          win.document.close();
+        } else {
+          message.error('无法打开预览窗口，请允许弹出窗口');
+        }
+        return;
       }
 
       const blob = await response.blob();

@@ -39,7 +39,7 @@ async function handler(
     });
   }
 
-  if (req.method !== 'POST' && req.method !== 'GET') {
+  if (req.method !== 'POST') {
     return res.status(405).json({
       success: false,
       error: 'Method Not Allowed',
@@ -83,19 +83,17 @@ async function handler(
     }
 
     let exportConfig: ExportConfig = { ...DEFAULT_EXPORT_CONFIG };
-    if (req.method === 'POST') {
-      const body = req.body as PdfExportBody;
-      if (body.config) {
-        exportConfig = {
-          ...DEFAULT_EXPORT_CONFIG,
-          ...body.config,
-          header: { ...DEFAULT_EXPORT_CONFIG.header, ...(body.config.header || {}) },
-          footer: { ...DEFAULT_EXPORT_CONFIG.footer, ...(body.config.footer || {}) },
-          cover: { ...DEFAULT_EXPORT_CONFIG.cover, ...(body.config.cover || {}) },
-          watermark: { ...DEFAULT_EXPORT_CONFIG.watermark, ...(body.config.watermark || {}) },
-          margin: body.config.margin || DEFAULT_EXPORT_CONFIG.margin,
-        };
-      }
+    const body = req.body as PdfExportBody;
+    if (body.config) {
+      exportConfig = {
+        ...DEFAULT_EXPORT_CONFIG,
+        ...body.config,
+        header: { ...DEFAULT_EXPORT_CONFIG.header, ...(body.config.header || {}) },
+        footer: { ...DEFAULT_EXPORT_CONFIG.footer, ...(body.config.footer || {}) },
+        cover: { ...DEFAULT_EXPORT_CONFIG.cover, ...(body.config.cover || {}) },
+        watermark: { ...DEFAULT_EXPORT_CONFIG.watermark, ...(body.config.watermark || {}) },
+        margin: body.config.margin || DEFAULT_EXPORT_CONFIG.margin,
+      };
     }
 
     const { html, headerTemplate, footerTemplate } = buildExportTemplate(
@@ -117,8 +115,6 @@ async function handler(
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--disable-software-rasterizer',
-        '--disable-web-security',
-        '--font-render-hinting=none',
       ],
       timeout: EXPORT_MEMORY_LIMITS.PUPPETEER_TIMEOUT_MS,
     });
@@ -133,14 +129,27 @@ async function handler(
 
       await page.route('**/*', (route) => {
         const url = route.request().url();
-        if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
-          if (/\.(png|jpe?g|gif|webp|svg)$/i.test(url) || url.startsWith('data:image/')) {
-            return route.continue();
-          }
-          if (url.startsWith('http://') || url.startsWith('https://')) {
+        const resourceType = route.request().resourceType();
+
+        if (url.startsWith('data:image/')) {
+          return route.continue();
+        }
+
+        if (url.startsWith('data:') && !url.startsWith('data:image/')) {
+          return route.abort('blockedbyclient');
+        }
+
+        if (resourceType === 'image' || resourceType === 'font' || resourceType === 'stylesheet') {
+          return route.continue();
+        }
+
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          if (resourceType === 'document' || resourceType === 'script' || resourceType === 'xhr' || resourceType === 'fetch') {
             return route.abort('blockedbyclient');
           }
+          return route.continue();
         }
+
         return route.continue();
       });
 
@@ -149,16 +158,9 @@ async function handler(
         timeout: EXPORT_MEMORY_LIMITS.PUPPETEER_TIMEOUT_MS,
       });
 
-      const pageSizeMap: Record<string, { width: string; height: string }> = {
-        'A4': { width: '210mm', height: '297mm' },
-        'Letter': { width: '215.9mm', height: '279.4mm' },
-        'Legal': { width: '215.9mm', height: '355.6mm' },
-      };
-      const size = pageSizeMap[exportConfig.pageSize || 'A4'] || pageSizeMap['A4'];
+      await page.waitForTimeout(500);
 
-      const pdfPromise = page.pdf({
-        format: exportConfig.pageSize || 'A4',
-        landscape: exportConfig.orientation === 'landscape',
+      const pdfOptions: Record<string, unknown> = {
         printBackground: true,
         preferCSSPageSize: true,
         displayHeaderFooter: exportConfig.header.enabled || exportConfig.footer.enabled,
@@ -170,9 +172,17 @@ async function handler(
           left: exportConfig.margin?.left || '20mm',
           right: exportConfig.margin?.right || '20mm',
         },
-        width: size.width,
-        height: size.height,
-      });
+      };
+
+      if (exportConfig.orientation === 'landscape') {
+        pdfOptions.format = exportConfig.pageSize || 'A4';
+        pdfOptions.landscape = true;
+      } else {
+        pdfOptions.format = exportConfig.pageSize || 'A4';
+        pdfOptions.landscape = false;
+      }
+
+      const pdfPromise = page.pdf(pdfOptions as Parameters<typeof page.pdf>[0]);
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('PDF 生成超时')), EXPORT_MEMORY_LIMITS.PUPPETEER_TIMEOUT_MS);

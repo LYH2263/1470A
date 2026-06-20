@@ -4,8 +4,8 @@ import type { Article } from '@/types/article';
 export interface ExportHeaderFooter {
   enabled: boolean;
   left?: string;
-  center?: string;
   right?: string;
+  center?: string;
   fontSize?: number;
 }
 
@@ -96,6 +96,9 @@ export interface ExportTemplateResult {
   footerTemplate?: string;
 }
 
+const CJK_FONT_STACK = "'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Source Han Sans SC', SimSun, sans-serif";
+const MONO_FONT_STACK = "Consolas, Monaco, 'Courier New', monospace";
+
 function configureDOMPurifyForExport(): void {
   DOMPurify.setConfig({
     ADD_TAGS: [
@@ -113,7 +116,7 @@ function configureDOMPurifyForExport(): void {
       'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'align',
       'type', 'data-language', 'alt', 'title',
     ],
-    FORBID_TAGS: ['script', 'style', 'noscript', 'iframe', 'form', 'input', 'button', 'select', 'textarea'],
+    FORBID_TAGS: ['script', 'noscript', 'iframe', 'form', 'input', 'button', 'select', 'textarea'],
     FORBID_ATTR: ['onclick', 'onload', 'onerror', 'onmouseover', 'onmouseout', 'onfocus', 'onblur', 'onchange', 'onsubmit'],
     ALLOW_DATA_ATTR: false,
     KEEP_CONTENT: true,
@@ -155,38 +158,38 @@ export function stripDarkThemeStyles(html: string): string {
 }
 
 export function handleLongImagePagination(html: string, maxHeightPx: number = 800): string {
-  const imgRegex = /<img([^>]*?)(?:style\s*=\s*"([^"]*)")?([^>]*)>/gi;
+  return html.replace(/<img\s+([^>]*?)>/gi, (fullMatch, attrs: string) => {
+    const styleMatch = attrs.match(/style\s*=\s*["']([^"']*?)["']/i);
+    const existingStyle = styleMatch ? styleMatch[1] : '';
 
-  return html.replace(imgRegex, (fullMatch, beforeStyle: string, styleAttr: string = '', afterStyle: string) => {
+    const heightAttrMatch = attrs.match(/height\s*=\s*["'](\d+)["']/i);
+
     let hasHeightConstraint = false;
-    if (styleAttr) {
-      if (/max-height/i.test(styleAttr) || /height\s*:\s*\d+px/i.test(styleAttr)) {
-        hasHeightConstraint = true;
-      }
+    if (existingStyle && /max-height|height\s*:\s*\d+/i.test(existingStyle)) {
+      hasHeightConstraint = true;
     }
-
-    if (/height\s*=\s*"\d+"/i.test(beforeStyle + afterStyle)) {
+    if (heightAttrMatch) {
       hasHeightConstraint = true;
     }
 
-    let newStyle = styleAttr || '';
+    let newStyle = existingStyle;
+    if (newStyle && !newStyle.trim().endsWith(';')) {
+      newStyle += ';';
+    }
 
     if (!hasHeightConstraint) {
-      if (newStyle && !newStyle.endsWith(';')) {
-        newStyle += ';';
-      }
-      newStyle += ` max-height: ${maxHeightPx}px; object-fit: contain; page-break-inside: avoid; break-inside: avoid;`;
+      newStyle += ` max-height: ${maxHeightPx}px;`;
+    }
+    newStyle += ' object-fit: contain; page-break-inside: avoid; break-inside: avoid;';
+
+    let newAttrs = attrs;
+    if (styleMatch) {
+      newAttrs = newAttrs.replace(/style\s*=\s*["'][^"']*?["']/i, `style="${newStyle.trim()}"`);
     } else {
-      if (newStyle && !newStyle.endsWith(';')) {
-        newStyle += ';';
-      }
-      newStyle += ' page-break-inside: avoid; break-inside: avoid;';
+      newAttrs += ` style="${newStyle.trim()}"`;
     }
 
-    if (newStyle) {
-      return `<img${beforeStyle}style="${newStyle.trim()}"${afterStyle}>`;
-    }
-    return fullMatch;
+    return `<img ${newAttrs}>`;
   });
 }
 
@@ -212,97 +215,47 @@ export function buildWatermarkSvg(watermark: ExportWatermark, username: string, 
   const rotation = watermark.rotation ?? -30;
   const color = watermark.color ?? '#666666';
 
-  return `
-    <svg class="watermark-layer" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
-      <defs>
-        <pattern id="watermarkPattern" x="0" y="0" width="300" height="200" patternUnits="userSpaceOnUse" patternTransform="rotate(${rotation})">
-          <text x="150" y="100" text-anchor="middle" font-size="${fontSize}px" font-family="'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif" fill="${color}" opacity="${opacity}" style="user-select: none; -webkit-user-select: none;">
-            ${text}
-          </text>
-        </pattern>
-      </defs>
-      <rect x="0" y="0" width="100%" height="100%" fill="url(#watermarkPattern)" />
-    </svg>
-  `;
+  const escapedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  return `<svg class="watermark-layer" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><defs><pattern id="watermarkPattern" x="0" y="0" width="300" height="200" patternUnits="userSpaceOnUse" patternTransform="rotate(${rotation})"><text x="150" y="100" text-anchor="middle" font-size="${fontSize}px" font-family=${CJK_FONT_STACK} fill="${color}" opacity="${opacity}" style="user-select:none;-webkit-user-select:none;">${escapedText}</text></pattern></defs><rect x="0" y="0" width="100%" height="100%" fill="url(#watermarkPattern)"/></svg>`;
 }
 
 function buildCoverHtml(article: Article, cover: ExportCover, ctx: ExportContext): string {
   if (!cover.enabled) return '';
 
-  const title = cover.title || article.title;
-  const subtitle = cover.subtitle || '';
+  const title = (cover.title || article.title)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const subtitle = (cover.subtitle || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const exportDate = formatDate(ctx.exportTime);
+  const safeAuthor = article.author.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeUsername = ctx.username.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeDisplayName = ctx.userDisplayName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  return `
-    <section class="export-cover" style="page-break-after: always;">
-      <div class="cover-content">
-        ${cover.showLogo ? `
-          <div class="cover-logo">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" fill="#1890ff"/>
-              <path d="M8 8h8v2H8V8zm0 4h8v2H8v-2zm0 4h5v2H8v-2z" fill="white"/>
-            </svg>
-          </div>
-        ` : ''}
-        <h1 class="cover-title">${title}</h1>
-        ${subtitle ? `<h2 class="cover-subtitle">${subtitle}</h2>` : ''}
-        <div class="cover-meta">
-          ${cover.showAuthor ? `
-            <div class="cover-meta-item">
-              <span class="cover-meta-label">作者：</span>
-              <span class="cover-meta-value">${article.author}</span>
-            </div>
-          ` : ''}
-          ${article.category ? `
-            <div class="cover-meta-item">
-              <span class="cover-meta-label">分类：</span>
-              <span class="cover-meta-value">${article.category.name}</span>
-            </div>
-          ` : ''}
-          <div class="cover-meta-item">
-            <span class="cover-meta-label">创建时间：</span>
-            <span class="cover-meta-value">${formatDate(new Date(article.createdAt))}</span>
-          </div>
-          <div class="cover-meta-item">
-            <span class="cover-meta-label">阅读数：</span>
-            <span class="cover-meta-value">${article.views}</span>
-          </div>
-        </div>
-        ${cover.showExportDate ? `
-          <div class="cover-export-info">
-            <div>导出人：${ctx.userDisplayName} (${ctx.username})</div>
-            <div>导出时间：${exportDate}</div>
-          </div>
-        ` : ''}
-      </div>
-    </section>
-  `;
+  return `<section class="export-cover" style="page-break-after:always;"><div class="cover-content">${cover.showLogo ? `<div class="cover-logo"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" fill="#1890ff"/><path d="M8 8h8v2H8V8zm0 4h8v2H8v-2zm0 4h5v2H8v-2z" fill="white"/></svg></div>` : ''}<h1 class="cover-title">${title}</h1>${subtitle ? `<h2 class="cover-subtitle">${subtitle}</h2>` : ''}<div class="cover-meta">${cover.showAuthor ? `<div class="cover-meta-item"><span class="cover-meta-label">作者：</span><span class="cover-meta-value">${safeAuthor}</span></div>` : ''}${article.category ? `<div class="cover-meta-item"><span class="cover-meta-label">分类：</span><span class="cover-meta-value">${article.category.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>` : ''}<div class="cover-meta-item"><span class="cover-meta-label">创建时间：</span><span class="cover-meta-value">${formatDate(new Date(article.createdAt))}</span></div><div class="cover-meta-item"><span class="cover-meta-label">阅读数：</span><span class="cover-meta-value">${article.views}</span></div></div>${cover.showExportDate ? `<div class="cover-export-info"><div>导出人：${safeDisplayName} (${safeUsername})</div><div>导出时间：${exportDate}</div></div>` : ''}</div></section>`;
 }
 
 export function buildPdfHeaderTemplate(config: ExportConfig, vars: Record<string, string>): string {
   if (!config.header.enabled) return '<span></span>';
 
   const fontSize = config.header.fontSize ?? 10;
-  return `
-    <div style="font-size: ${fontSize}px; padding: 0 20px; width: 100%; display: flex; justify-content: space-between; color: #666; border-bottom: 1px solid #e8e8e8; padding-bottom: 6px;">
-      <span style="text-align: left; flex: 1;">${applyTemplateVars(config.header.left || '', vars)}</span>
-      <span style="text-align: center; flex: 1;">${applyTemplateVars(config.header.center || '', vars)}</span>
-      <span style="text-align: right; flex: 1;">${applyTemplateVars(config.header.right || '', vars)}</span>
-    </div>
-  `;
+  return `<div style="font-size:${fontSize}px;padding:0 20px;width:100%;display:flex;justify-content:space-between;color:#666;border-bottom:1px solid #e8e8e8;padding-bottom:6px;font-family:${CJK_FONT_STACK};"><span style="text-align:left;flex:1;">${applyTemplateVars(config.header.left || '', vars)}</span><span style="text-align:center;flex:1;">${applyTemplateVars(config.header.center || '', vars)}</span><span style="text-align:right;flex:1;">${applyTemplateVars(config.header.right || '', vars)}</span></div>`;
 }
 
-export function buildPdffooterTemplate(config: ExportConfig, vars: Record<string, string>): string {
+export function buildPdfFooterTemplate(config: ExportConfig, vars: Record<string, string>): string {
   if (!config.footer.enabled) return '<span></span>';
 
   const fontSize = config.footer.fontSize ?? 9;
-  return `
-    <div style="font-size: ${fontSize}px; padding: 0 20px; width: 100%; display: flex; justify-content: space-between; color: #666; border-top: 1px solid #e8e8e8; padding-top: 6px;">
-      <span style="text-align: left; flex: 1;">${applyTemplateVars(config.footer.left || '', vars)}</span>
-      <span style="text-align: center; flex: 1;">${applyTemplateVars(config.footer.center || '', vars)}</span>
-      <span style="text-align: right; flex: 1;">${applyTemplateVars(config.footer.right || '', vars)}</span>
-    </div>
-  `;
+  const leftText = applyTemplateVars(config.footer.left || '', vars);
+  const centerText = applyTemplateVars(config.footer.center || '', vars);
+  const rightRaw = (config.footer.right || '').replace(/\{pageNumber\}/g, '<span class="pageNumber"></span>').replace(/\{totalPages\}/g, '<span class="totalPages"></span>');
+  const rightText = applyTemplateVars(rightRaw, vars);
+
+  return `<div style="font-size:${fontSize}px;padding:0 20px;width:100%;display:flex;justify-content:space-between;color:#666;border-top:1px solid #e8e8e8;padding-top:6px;font-family:${CJK_FONT_STACK};"><span style="text-align:left;flex:1;">${leftText}</span><span style="text-align:center;flex:1;">${centerText}</span><span style="text-align:right;flex:1;">${rightText}</span></div>`;
 }
 
 function buildPrintStyles(pageSize: string, orientation: string, margin: ExportConfig['margin']): string {
@@ -314,374 +267,11 @@ function buildPrintStyles(pageSize: string, orientation: string, margin: ExportC
   const baseSize = sizeMap[pageSize] || sizeMap['A4'];
   const finalSize = orientation === 'landscape' ? baseSize.split(' ').reverse().join(' ') : baseSize;
 
-  return `
-    @page {
-      size: ${finalSize};
-      margin: ${margin?.top || '25mm'} ${margin?.right || '20mm'} ${margin?.bottom || '25mm'} ${margin?.left || '20mm'};
-    }
-
-    @media print {
-      html, body {
-        background: white !important;
-        color: black !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-
-      .watermark-layer {
-        position: fixed !important;
-        top: 0;
-        left: 0;
-        z-index: 9999;
-        pointer-events: none;
-      }
-
-      .export-cover {
-        page-break-after: always;
-        break-after: page;
-      }
-
-      h1, h2, h3, h4, h5, h6 {
-        page-break-after: avoid;
-        break-after: avoid;
-      }
-
-      table, img, figure, pre, code, blockquote {
-        page-break-inside: avoid;
-        break-inside: avoid;
-      }
-
-      p, li, tr {
-        orphans: 3;
-        widows: 3;
-      }
-    }
-
-    @media screen {
-      body {
-        background: #f5f5f5;
-        padding: 40px 0;
-      }
-
-      .print-page {
-        background: white;
-        max-width: 210mm;
-        margin: 0 auto 20px;
-        padding: 25mm 20mm;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        min-height: 297mm;
-        box-sizing: border-box;
-      }
-    }
-  `;
+  return `@page{size:${finalSize};margin:${margin?.top || '25mm'} ${margin?.right || '20mm'} ${margin?.bottom || '25mm'} ${margin?.left || '20mm'};}@media print{html,body{background:white!important;color:black!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.watermark-layer{position:fixed!important;top:0;left:0;z-index:9999;pointer-events:none;}.export-cover{page-break-after:always;break-after:page;}h1,h2,h3,h4,h5,h6{page-break-after:avoid;break-after:avoid;}table,img,figure{page-break-inside:avoid;break-inside:avoid;}p,li,tr{orphans:3;widows:3;}}@media screen{body{background:#f5f5f5;padding:40px 0;}.print-page{background:white;max-width:210mm;margin:0 auto 20px;padding:25mm 20mm;box-shadow:0 2px 8px rgba(0,0,0,0.15);min-height:297mm;box-sizing:border-box;}}`;
 }
 
 function buildArticleStyles(): string {
-  return `
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'SimSun', sans-serif;
-      font-size: 14px;
-      line-height: 1.8;
-      color: #333;
-      margin: 0;
-      padding: 0;
-    }
-
-    .article-print-container {
-      position: relative;
-    }
-
-    .watermark-layer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
-      pointer-events: none;
-      overflow: hidden;
-    }
-
-    .article-content-wrapper {
-      position: relative;
-      z-index: 1;
-    }
-
-    .article-header {
-      border-bottom: 2px solid #1890ff;
-      padding-bottom: 20px;
-      margin-bottom: 30px;
-    }
-
-    .article-header h1 {
-      font-size: 28px;
-      font-weight: 700;
-      color: #111;
-      margin: 0 0 16px 0;
-      line-height: 1.4;
-    }
-
-    .article-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px 24px;
-      font-size: 13px;
-      color: #666;
-    }
-
-    .article-meta-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .article-meta-label {
-      color: #999;
-    }
-
-    .article-content {
-      font-size: 15px;
-      line-height: 1.9;
-    }
-
-    .article-content h1 {
-      font-size: 24px;
-      font-weight: 700;
-      margin: 32px 0 16px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #e8e8e8;
-      color: #111;
-    }
-
-    .article-content h2 {
-      font-size: 20px;
-      font-weight: 700;
-      margin: 28px 0 14px;
-      color: #222;
-    }
-
-    .article-content h3 {
-      font-size: 18px;
-      font-weight: 600;
-      margin: 24px 0 12px;
-      color: #222;
-    }
-
-    .article-content h4, .article-content h5, .article-content h6 {
-      font-size: 16px;
-      font-weight: 600;
-      margin: 20px 0 10px;
-      color: #333;
-    }
-
-    .article-content p {
-      margin: 12px 0;
-      text-align: justify;
-    }
-
-    .article-content a {
-      color: #1890ff;
-      text-decoration: none;
-      border-bottom: 1px solid #1890ff;
-    }
-
-    .article-content img {
-      max-width: 100%;
-      height: auto;
-      display: block;
-      margin: 16px auto;
-      border-radius: 4px;
-    }
-
-    .article-content ul, .article-content ol {
-      padding-left: 24px;
-      margin: 12px 0;
-    }
-
-    .article-content li {
-      margin: 6px 0;
-    }
-
-    .article-content blockquote {
-      margin: 16px 0;
-      padding: 12px 16px;
-      background: #f6f8fa;
-      border-left: 4px solid #1890ff;
-      color: #555;
-      border-radius: 0 4px 4px 0;
-    }
-
-    .article-content blockquote p {
-      margin: 0;
-    }
-
-    .article-content pre {
-      background: #f6f8fa;
-      border: 1px solid #e1e4e8;
-      border-radius: 6px;
-      padding: 16px;
-      overflow-x: auto;
-      margin: 16px 0;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    .article-content pre code {
-      background: none;
-      padding: 0;
-      border: none;
-      font-size: inherit;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    }
-
-    .article-content code {
-      background: #f6f8fa;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 13px;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-      border: 1px solid #e1e4e8;
-    }
-
-    .article-content table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 16px 0;
-      font-size: 14px;
-    }
-
-    .article-content th,
-    .article-content td {
-      border: 1px solid #d0d7de;
-      padding: 10px 14px;
-      text-align: left;
-      vertical-align: top;
-    }
-
-    .article-content th {
-      background: #f6f8fa;
-      font-weight: 600;
-      color: #222;
-    }
-
-    .article-content tr:nth-child(even) td {
-      background: #fafbfc;
-    }
-
-    .article-content hr {
-      border: none;
-      border-top: 1px solid #e8e8e8;
-      margin: 24px 0;
-    }
-
-    .article-content strong {
-      font-weight: 600;
-    }
-
-    .article-content em {
-      font-style: italic;
-    }
-
-    .article-content del {
-      text-decoration: line-through;
-      color: #999;
-    }
-
-    .article-content mark {
-      background: #fff3cd;
-      padding: 2px 4px;
-      border-radius: 2px;
-    }
-
-    .article-content figure {
-      margin: 16px 0;
-      text-align: center;
-    }
-
-    .article-content figcaption {
-      font-size: 13px;
-      color: #666;
-      margin-top: 8px;
-      text-align: center;
-    }
-
-    .export-cover {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: 60px 40px;
-    }
-
-    .cover-content {
-      text-align: center;
-      max-width: 600px;
-    }
-
-    .cover-logo {
-      margin-bottom: 40px;
-      display: flex;
-      justify-content: center;
-    }
-
-    .cover-title {
-      font-size: 36px;
-      font-weight: 700;
-      color: #111;
-      margin: 0 0 16px 0;
-      line-height: 1.4;
-    }
-
-    .cover-subtitle {
-      font-size: 20px;
-      color: #666;
-      font-weight: 400;
-      margin: 0 0 48px 0;
-    }
-
-    .cover-meta {
-      text-align: left;
-      background: #f6f8fa;
-      padding: 24px 32px;
-      border-radius: 8px;
-      margin: 0 0 40px 0;
-    }
-
-    .cover-meta-item {
-      display: flex;
-      padding: 8px 0;
-      border-bottom: 1px solid #e1e4e8;
-      font-size: 15px;
-    }
-
-    .cover-meta-item:last-child {
-      border-bottom: none;
-    }
-
-    .cover-meta-label {
-      color: #666;
-      min-width: 100px;
-      font-weight: 500;
-    }
-
-    .cover-meta-value {
-      color: #222;
-      font-weight: 600;
-    }
-
-    .cover-export-info {
-      text-align: center;
-      font-size: 13px;
-      color: #999;
-      padding-top: 24px;
-      border-top: 1px solid #e8e8e8;
-      line-height: 2;
-    }
-  `;
+  return `*{box-sizing:border-box;}html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}body{font-family:${CJK_FONT_STACK};font-size:14px;line-height:1.8;color:#333;margin:0;padding:0;word-break:break-word;overflow-wrap:break-word;line-break:auto;-webkit-text-size-adjust:100%;}.article-print-container{position:relative;}.watermark-layer{position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:hidden;}.article-content-wrapper{position:relative;z-index:1;}.article-header{border-bottom:2px solid #1890ff;padding-bottom:20px;margin-bottom:30px;}.article-header h1{font-size:28px;font-weight:700;color:#111;margin:0 0 16px 0;line-height:1.5;word-break:break-word;}.article-meta{display:flex;flex-wrap:wrap;gap:16px 24px;font-size:13px;color:#666;}.article-meta-item{display:inline-flex;align-items:center;gap:4px;}.article-meta-label{color:#999;}.article-content{font-size:15px;line-height:2;}.article-content h1{font-size:24px;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:1px solid #e8e8e8;color:#111;line-height:1.5;}.article-content h2{font-size:20px;font-weight:700;margin:28px 0 14px;color:#222;line-height:1.5;}.article-content h3{font-size:18px;font-weight:600;margin:24px 0 12px;color:#222;line-height:1.5;}.article-content h4,.article-content h5,.article-content h6{font-size:16px;font-weight:600;margin:20px 0 10px;color:#333;line-height:1.5;}.article-content p{margin:12px 0;text-align:justify;line-height:2;}.article-content a{color:#1890ff;text-decoration:none;border-bottom:1px solid #1890ff;}.article-content img{max-width:100%;height:auto;display:block;margin:16px auto;border-radius:4px;page-break-inside:avoid;break-inside:avoid;}.article-content ul,.article-content ol{padding-left:24px;margin:12px 0;}.article-content li{margin:6px 0;line-height:2;}.article-content blockquote{margin:16px 0;padding:12px 16px;background:#f6f8fa;border-left:4px solid #1890ff;color:#555;border-radius:0 4px 4px 0;}.article-content blockquote p{margin:0;}.article-content pre{background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:16px;overflow-x:auto;margin:16px 0;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-all;page-break-inside:avoid;break-inside:avoid;}.article-content pre code{background:none;padding:0;border:none;font-size:inherit;font-family:${MONO_FONT_STACK};}.article-content code{background:#f6f8fa;padding:2px 6px;border-radius:3px;font-size:13px;font-family:${MONO_FONT_STACK};border:1px solid #e1e4e8;}.article-content table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px;page-break-inside:avoid;break-inside:avoid;}.article-content th,.article-content td{border:1px solid #d0d7de;padding:10px 14px;text-align:left;vertical-align:top;word-break:break-word;}.article-content th{background:#f6f8fa;font-weight:600;color:#222;}.article-content tr:nth-child(even) td{background:#fafbfc;}.article-content hr{border:none;border-top:1px solid #e8e8e8;margin:24px 0;}.article-content strong{font-weight:600;}.article-content em{font-style:italic;}.article-content del{text-decoration:line-through;color:#999;}.article-content mark{background:#fff3cd;padding:2px 4px;border-radius:2px;}.article-content figure{margin:16px 0;text-align:center;page-break-inside:avoid;break-inside:avoid;}.article-content figcaption{font-size:13px;color:#666;margin-top:8px;text-align:center;}.export-cover{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:60px 40px;}.cover-content{text-align:center;max-width:600px;}.cover-logo{margin-bottom:40px;display:flex;justify-content:center;}.cover-title{font-size:36px;font-weight:700;color:#111;margin:0 0 16px 0;line-height:1.5;word-break:break-word;}.cover-subtitle{font-size:20px;color:#666;font-weight:400;margin:0 0 48px 0;}.cover-meta{text-align:left;background:#f6f8fa;padding:24px 32px;border-radius:8px;margin:0 0 40px 0;}.cover-meta-item{display:flex;padding:8px 0;border-bottom:1px solid #e1e4e8;font-size:15px;}.cover-meta-item:last-child{border-bottom:none;}.cover-meta-label{color:#666;min-width:100px;font-weight:500;}.cover-meta-value{color:#222;font-weight:600;}.cover-export-info{text-align:center;font-size:13px;color:#999;padding-top:24px;border-top:1px solid #e8e8e8;line-height:2;}`;
 }
 
 export function buildExportTemplate(
@@ -696,8 +286,6 @@ export function buildExportTemplate(
     exportUser: `${ctx.userDisplayName}(${ctx.username})`,
     exportDate: formatDate(ctx.exportTime),
     createDate: formatDate(new Date(article.createdAt)),
-    pageNumber: '',
-    totalPages: '',
   };
 
   let processedContent = stripScriptsAndStyles(rawContent);
@@ -715,56 +303,42 @@ export function buildExportTemplate(
     : '';
 
   const headerTemplate = buildPdfHeaderTemplate(config, templateVars);
-  const footerTemplate = buildPdffooterTemplate(config, templateVars);
+  const footerTemplate = buildPdfFooterTemplate(config, templateVars);
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${article.title} - 导出文档</title>
-  <style>
-    ${buildPrintStyles(config.pageSize || 'A4', config.orientation || 'portrait', config.margin)}
-    ${buildArticleStyles()}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${article.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')} - 导出文档</title>
+<style>
+${buildPrintStyles(config.pageSize || 'A4', config.orientation || 'portrait', config.margin)}
+${buildArticleStyles()}
+</style>
 </head>
 <body>
-  <div class="print-page">
-    <div class="article-print-container">
-      ${watermarkHtml}
-      <div class="article-content-wrapper">
-        ${coverHtml}
-        <article>
-          <header class="article-header">
-            <h1>${article.title}</h1>
-            <div class="article-meta">
-              <div class="article-meta-item">
-                <span class="article-meta-label">作者：</span>
-                <span>${article.author}</span>
-              </div>
-              ${article.category ? `
-                <div class="article-meta-item">
-                  <span class="article-meta-label">分类：</span>
-                  <span>${article.category.name}</span>
-                </div>
-              ` : ''}
-              <div class="article-meta-item">
-                <span class="article-meta-label">创建时间：</span>
-                <span>${formatDate(new Date(article.createdAt))}</span>
-              </div>
-              <div class="article-meta-item">
-                <span class="article-meta-label">阅读：</span>
-                <span>${article.views} 次</span>
-              </div>
-            </div>
-          </header>
-          <div class="article-content">
-            ${processedContent}
-          </div>
-        </article>
-      </div>
-    </div>
-  </div>
+<div class="print-page">
+<div class="article-print-container">
+${watermarkHtml}
+<div class="article-content-wrapper">
+${coverHtml}
+<article>
+<header class="article-header">
+<h1>${article.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h1>
+<div class="article-meta">
+<div class="article-meta-item"><span class="article-meta-label">作者：</span><span>${article.author.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>
+${article.category ? `<div class="article-meta-item"><span class="article-meta-label">分类：</span><span>${article.category.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>` : ''}
+<div class="article-meta-item"><span class="article-meta-label">创建时间：</span><span>${formatDate(new Date(article.createdAt))}</span></div>
+<div class="article-meta-item"><span class="article-meta-label">阅读：</span><span>${article.views} 次</span></div>
+</div>
+</header>
+<div class="article-content">
+${processedContent}
+</div>
+</article>
+</div>
+</div>
+</div>
 </body>
 </html>`;
 
