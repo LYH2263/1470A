@@ -18,6 +18,42 @@ async function ensureFtsTable(): Promise<void> {
     )
   `);
 
+  await prisma.$executeRawUnsafe(`
+    CREATE TRIGGER IF NOT EXISTS "article_fts_ai" AFTER INSERT ON "Article" BEGIN
+      INSERT INTO "ArticleFts"("rowid", "title", "contentPlainText", "author")
+      VALUES (new.rowid, new.title, new.contentPlainText, new.author);
+    END
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TRIGGER IF NOT EXISTS "article_fts_ad" AFTER DELETE ON "Article" BEGIN
+      INSERT INTO "ArticleFts"("ArticleFts", "rowid", "title", "contentPlainText", "author")
+      VALUES ('delete', old.rowid, old.title, old.contentPlainText, old.author);
+    END
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TRIGGER IF NOT EXISTS "article_fts_au" AFTER UPDATE ON "Article" BEGIN
+      INSERT INTO "ArticleFts"("ArticleFts", "rowid", "title", "contentPlainText", "author")
+      VALUES ('delete', old.rowid, old.title, old.contentPlainText, old.author);
+      INSERT INTO "ArticleFts"("rowid", "title", "contentPlainText", "author")
+      VALUES (new.rowid, new.title, new.contentPlainText, new.author);
+    END
+  `);
+
+  const ftsCount = await prisma.$queryRawUnsafe<{ total: bigint }[]>(
+    `SELECT COUNT(*) as total FROM "ArticleFts"`
+  );
+  const articleCount = await prisma.$queryRawUnsafe<{ total: bigint }[]>(
+    `SELECT COUNT(*) as total FROM "Article"`
+  );
+
+  if (Number(ftsCount[0]?.total ?? 0) === 0 && Number(articleCount[0]?.total ?? 0) > 0) {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "ArticleFts"("ArticleFts") VALUES ('rebuild')`
+    );
+  }
+
   ftsInitialized = true;
 }
 
@@ -179,20 +215,6 @@ export async function rebuildFtsIndex(): Promise<number> {
     `SELECT COUNT(*) as total FROM "ArticleFts"`
   );
   return Number(countResult[0]?.total ?? 0);
-}
-
-export async function updateFtsForArticle(
-  articleId: string,
-  title: string,
-  contentPlainText: string,
-  author: string
-): Promise<void> {
-  const tokenized = tokenizeChinese(contentPlainText);
-  await prisma.$executeRawUnsafe(
-    `UPDATE "Article" SET "contentPlainText" = ? WHERE "id" = ?`,
-    tokenized,
-    articleId
-  );
 }
 
 export { stripHtml, tokenizeChinese, buildFtsQuery } from './html-utils';

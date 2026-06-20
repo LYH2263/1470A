@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { stripHtml, tokenizeChinese } from '../src/lib/search';
+import { stripHtml, tokenizeChinese } from '../src/lib/html-utils';
 
 const prisma = new PrismaClient();
 
@@ -17,6 +17,30 @@ async function migrateFts() {
       )
     `);
     console.log('✅ FTS5 虚拟表已创建');
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER IF NOT EXISTS "article_fts_ai" AFTER INSERT ON "Article" BEGIN
+        INSERT INTO "ArticleFts"("rowid", "title", "contentPlainText", "author")
+        VALUES (new.rowid, new.title, new.contentPlainText, new.author);
+      END
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER IF NOT EXISTS "article_fts_ad" AFTER DELETE ON "Article" BEGIN
+        INSERT INTO "ArticleFts"("ArticleFts", "rowid", "title", "contentPlainText", "author")
+        VALUES ('delete', old.rowid, old.title, old.contentPlainText, old.author);
+      END
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER IF NOT EXISTS "article_fts_au" AFTER UPDATE ON "Article" BEGIN
+        INSERT INTO "ArticleFts"("ArticleFts", "rowid", "title", "contentPlainText", "author")
+        VALUES ('delete', old.rowid, old.title, old.contentPlainText, old.author);
+        INSERT INTO "ArticleFts"("rowid", "title", "contentPlainText", "author")
+        VALUES (new.rowid, new.title, new.contentPlainText, new.author);
+      END
+    `);
+    console.log('✅ FTS5 同步触发器已创建');
 
     const articles = await prisma.article.findMany({
       select: { id: true, content: true, contentPlainText: true },

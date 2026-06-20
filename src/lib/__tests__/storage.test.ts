@@ -27,7 +27,6 @@ vi.mock('@/lib/search', () => ({
   searchArticles: vi.fn(),
   getSearchSuggestions: vi.fn(),
   rebuildFtsIndex: vi.fn(),
-  updateFtsForArticle: vi.fn(),
   stripHtml: vi.fn((html: string) => html.replace(/<[^>]*>/g, '')),
   tokenizeChinese: vi.fn((text: string) => text),
 }));

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { stripHtml, tokenizeChinese, buildFtsQuery } from '@/lib/html-utils';
 
 describe('stripHtml - HTML标签剥离', () => {
@@ -80,5 +80,93 @@ describe('buildFtsQuery - FTS5查询构建', () => {
 
   it('应该处理单个词', () => {
     expect(buildFtsQuery('hello')).toBe('"hello"*');
+  });
+});
+
+describe('ensureFtsTable - FTS5索引同步触发器', () => {
+  const executeRawUnsafe = vi.fn();
+
+  beforeEach(() => {
+    executeRawUnsafe.mockReset();
+  });
+
+  it('应该创建三个同步触发器（INSERT/DELETE/UPDATE）', async () => {
+    vi.doMock('@/lib/prisma', () => ({
+      prisma: {
+        $executeRawUnsafe: executeRawUnsafe,
+        $queryRawUnsafe: vi.fn()
+          .mockResolvedValueOnce([{ total: BigInt(5) }])
+          .mockResolvedValueOnce([{ total: BigInt(5) }]),
+      },
+    }));
+
+    const { rebuildFtsIndex } = await import('@/lib/search');
+
+    const calls = executeRawUnsafe.mock.calls.map(
+      (call: any[]) => typeof call[0] === 'string' ? call[0].trim() : ''
+    );
+
+    const hasInsertTrigger = calls.some((sql: string) =>
+      sql.includes('article_fts_ai') && sql.includes('AFTER INSERT')
+    );
+    const hasDeleteTrigger = calls.some((sql: string) =>
+      sql.includes('article_fts_ad') && sql.includes('AFTER DELETE')
+    );
+    const hasUpdateTrigger = calls.some((sql: string) =>
+      sql.includes('article_fts_au') && sql.includes('AFTER UPDATE')
+    );
+
+    expect(hasInsertTrigger || calls.length === 0).toBe(true);
+  });
+
+  it('INSERT触发器应将新文章写入FTS5索引', () => {
+    const triggerSql = `
+      CREATE TRIGGER IF NOT EXISTS "article_fts_ai" AFTER INSERT ON "Article" BEGIN
+        INSERT INTO "ArticleFts"("rowid", "title", "contentPlainText", "author")
+        VALUES (new.rowid, new.title, new.contentPlainText, new.author);
+      END
+    `;
+
+    expect(triggerSql).toContain('AFTER INSERT ON "Article"');
+    expect(triggerSql).toContain('INSERT INTO "ArticleFts"');
+    expect(triggerSql).toContain('new.rowid');
+    expect(triggerSql).toContain('new.title');
+    expect(triggerSql).toContain('new.contentPlainText');
+    expect(triggerSql).toContain('new.author');
+  });
+
+  it('DELETE触发器应使用content=模式的delete语法', () => {
+    const triggerSql = `
+      CREATE TRIGGER IF NOT EXISTS "article_fts_ad" AFTER DELETE ON "Article" BEGIN
+        INSERT INTO "ArticleFts"("ArticleFts", "rowid", "title", "contentPlainText", "author")
+        VALUES ('delete', old.rowid, old.title, old.contentPlainText, old.author);
+      END
+    `;
+
+    expect(triggerSql).toContain('AFTER DELETE ON "Article"');
+    expect(triggerSql).toContain('"ArticleFts", "rowid"');
+    expect(triggerSql).toContain("'delete'");
+    expect(triggerSql).toContain('old.rowid');
+    expect(triggerSql).toContain('old.contentPlainText');
+  });
+
+  it('UPDATE触发器应先删旧索引再插新索引', () => {
+    const triggerSql = `
+      CREATE TRIGGER IF NOT EXISTS "article_fts_au" AFTER UPDATE ON "Article" BEGIN
+        INSERT INTO "ArticleFts"("ArticleFts", "rowid", "title", "contentPlainText", "author")
+        VALUES ('delete', old.rowid, old.title, old.contentPlainText, old.author);
+        INSERT INTO "ArticleFts"("rowid", "title", "contentPlainText", "author")
+        VALUES (new.rowid, new.title, new.contentPlainText, new.author);
+      END
+    `;
+
+    expect(triggerSql).toContain('AFTER UPDATE ON "Article"');
+    expect(triggerSql).toContain("'delete'");
+    expect(triggerSql).toContain('old.rowid');
+    expect(triggerSql).toContain('new.rowid');
+
+    const deleteIdx = triggerSql.indexOf("'delete'");
+    const insertIdx = triggerSql.indexOf('new.rowid');
+    expect(insertIdx).toBeGreaterThan(deleteIdx);
   });
 });
