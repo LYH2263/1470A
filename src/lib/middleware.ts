@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { verifyToken, getUserById, type JWTPayload } from './auth';
-import { getMaintenanceMode, isPathExempt } from './system-status';
+import { getMaintenanceMode, getMaintenanceExemptPaths, isPathExempt } from './system-status';
 
 export interface AuthenticatedRequest extends NextApiRequest {
   user?: JWTPayload;
@@ -11,13 +11,18 @@ type ApiHandler = (
   res: NextApiResponse
 ) => Promise<void> | void;
 
+const HARDCODED_EXEMPT_PATHS = ['/api/health', '/api/auth/login', '/api/system/status', '/login'];
+
 export async function checkMaintenanceMode(
   req: NextApiRequest,
   res: NextApiResponse
 ): Promise<boolean> {
   const path = req.url || '';
 
-  if (isPathExempt(path, ['/api/health', '/api/auth/login', '/api/system/status'])) {
+  const configuredExemptPaths = await getMaintenanceExemptPaths();
+  const allExemptPaths = [...new Set([...HARDCODED_EXEMPT_PATHS, ...configuredExemptPaths])];
+
+  if (isPathExempt(path, allExemptPaths)) {
     return false;
   }
 

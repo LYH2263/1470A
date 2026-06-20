@@ -1,6 +1,6 @@
 import type { AppProps } from 'next/app';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Spin } from 'antd';
 import { AntdRegistry } from '@ant-design/nextjs-registry';
 import { ConfigProvider } from 'antd';
@@ -14,9 +14,11 @@ import { fetchWithAuth, getToken } from '@/lib/api';
 
 function MaintenanceGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { maintenance } = useSystemStatus();
+  const { maintenance, refreshStatus } = useSystemStatus();
   const { user } = useAuth();
   const [checking, setChecking] = useState(true);
+  const adminCheckedRef = useRef(false);
+  const isAdminRef = useRef(false);
 
   useEffect(() => {
     const checkMaintenance = async () => {
@@ -31,32 +33,40 @@ function MaintenanceGuard({ children }: { children: React.ReactNode }) {
       }
 
       if (maintenance.enabled) {
-        const token = getToken();
-        let isAdmin = user?.role === 'admin';
+        if (!adminCheckedRef.current) {
+          const token = getToken();
+          let isAdmin = user?.role === 'admin';
 
-        if (!isAdmin && token) {
-          try {
-            const meResponse = await fetchWithAuth('/api/auth/me');
-            if (meResponse.ok) {
-              const meResult = await meResponse.json();
-              isAdmin = meResult.data?.role === 'admin';
+          if (!isAdmin && token) {
+            try {
+              const meResponse = await fetchWithAuth('/api/auth/me');
+              if (meResponse.ok) {
+                const meResult = await meResponse.json();
+                isAdmin = meResult.data?.role === 'admin';
+              }
+            } catch {
+              isAdmin = false;
             }
-          } catch {
-            isAdmin = false;
           }
+
+          isAdminRef.current = isAdmin;
+          adminCheckedRef.current = true;
         }
 
-        if (!isAdmin) {
+        if (!isAdminRef.current) {
           router.replace('/maintenance');
           return;
         }
+      } else {
+        adminCheckedRef.current = false;
+        isAdminRef.current = false;
       }
 
       setChecking(false);
     };
 
     checkMaintenance();
-  }, [maintenance, router, user]);
+  }, [maintenance, router, user, refreshStatus]);
 
   if (checking) {
     return (

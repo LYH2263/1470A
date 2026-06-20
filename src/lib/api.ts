@@ -15,6 +15,8 @@ export function removeToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+let maintenanceRedirectScheduled = false;
+
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {}
@@ -42,7 +44,16 @@ export async function fetchWithAuth(
   if (response.status === 503 && typeof window !== 'undefined') {
     const currentPath = window.location.pathname;
     if (currentPath !== '/maintenance' && currentPath !== '/login') {
-      window.location.href = '/maintenance';
+      if (!maintenanceRedirectScheduled) {
+        maintenanceRedirectScheduled = true;
+        import('@/lib/system-status-events').then(({ emitSystemStatusChange }) => {
+          emitSystemStatusChange();
+        });
+        setTimeout(() => {
+          window.location.href = '/maintenance';
+          maintenanceRedirectScheduled = false;
+        }, 100);
+      }
     }
   }
 

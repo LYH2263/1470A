@@ -15,6 +15,10 @@ const DEFAULT_MAINTENANCE_MODE: MaintenanceMode = {
   exemptPaths: ['/api/health', '/api/auth/login', '/login'],
 };
 
+function invalidateAllCaches() {
+  cache.invalidateAll();
+}
+
 export async function getActiveAnnouncements(): Promise<SystemAnnouncement[]> {
   const cached = cache.get<SystemAnnouncement[]>(CACHE_KEYS.ANNOUNCEMENTS_ACTIVE);
   if (cached) return cached;
@@ -81,8 +85,7 @@ export async function createAnnouncement(
     },
   });
 
-  cache.delete(CACHE_KEYS.ANNOUNCEMENTS_ACTIVE);
-  cache.delete(CACHE_KEYS.SYSTEM_STATUS);
+  invalidateAllCaches();
   return announcement as SystemAnnouncement;
 }
 
@@ -100,15 +103,13 @@ export async function updateAnnouncement(
     },
   });
 
-  cache.delete(CACHE_KEYS.ANNOUNCEMENTS_ACTIVE);
-  cache.delete(CACHE_KEYS.SYSTEM_STATUS);
+  invalidateAllCaches();
   return announcement as SystemAnnouncement;
 }
 
 export async function deleteAnnouncement(id: string): Promise<void> {
   await prisma.systemAnnouncement.delete({ where: { id } });
-  cache.delete(CACHE_KEYS.ANNOUNCEMENTS_ACTIVE);
-  cache.delete(CACHE_KEYS.SYSTEM_STATUS);
+  invalidateAllCaches();
 }
 
 export async function getMaintenanceMode(): Promise<MaintenanceMode> {
@@ -148,29 +149,27 @@ export async function setMaintenanceMode(mode: Partial<MaintenanceMode>): Promis
     },
   });
 
-  cache.delete(CACHE_KEYS.MAINTENANCE_MODE);
-  cache.delete(CACHE_KEYS.SYSTEM_STATUS);
+  invalidateAllCaches();
   return updated;
 }
 
 export async function getSystemStatus(): Promise<{
   maintenance: MaintenanceMode;
   announcements: SystemAnnouncement[];
+  version: number;
 }> {
-  const cached = cache.get<{
-    maintenance: MaintenanceMode;
-    announcements: SystemAnnouncement[];
-  }>(CACHE_KEYS.SYSTEM_STATUS);
-  if (cached) return cached;
-
   const [maintenance, announcements] = await Promise.all([
     getMaintenanceMode(),
     getActiveAnnouncements(),
   ]);
 
-  const result = { maintenance, announcements };
-  cache.set(CACHE_KEYS.SYSTEM_STATUS, result, CACHE_TTL.SHORT);
-  return result;
+  const version = Date.now();
+  return { maintenance, announcements, version };
+}
+
+export async function getMaintenanceExemptPaths(): Promise<string[]> {
+  const mode = await getMaintenanceMode();
+  return mode.exemptPaths;
 }
 
 export function isPathExempt(path: string, exemptPaths: string[]): boolean {

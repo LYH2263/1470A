@@ -15,6 +15,7 @@ import {
 import { SettingOutlined, WarningOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { fetchWithAuth } from '@/lib/api';
+import { emitSystemStatusChange } from '@/lib/system-status-events';
 import type { MaintenanceMode } from '@/types/announcement';
 
 const { RangePicker } = DatePicker;
@@ -89,6 +90,7 @@ export default function MaintenanceSettings() {
       if (response.ok) {
         const result = await response.json();
         setCurrentMode(result.data);
+        emitSystemStatusChange();
         message.success('设置保存成功');
       } else {
         const result = await response.json();

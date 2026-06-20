@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Result, Button, Spin } from 'antd';
 import { useRouter } from 'next/router';
 import { fetchWithAuth, getToken } from '@/lib/api';
@@ -9,42 +9,50 @@ export default function MaintenancePage() {
   const [maintenance, setMaintenance] = useState<MaintenanceMode | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const isAdminRef = useRef(false);
 
-  useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const token = getToken();
-        if (token) {
+  const checkStatus = useCallback(async () => {
+    try {
+      const token = getToken();
+      if (token && !isAdminRef.current) {
+        try {
           const meResponse = await fetchWithAuth('/api/auth/me');
           if (meResponse.ok) {
             const meResult = await meResponse.json();
-            setIsAdmin(meResult.data?.role === 'admin');
+            const admin = meResult.data?.role === 'admin';
+            isAdminRef.current = admin;
+            setIsAdmin(admin);
           }
+        } catch {
+          isAdminRef.current = false;
+          setIsAdmin(false);
         }
-
-        const response = await fetch('/api/system/status');
-        if (response.ok) {
-          const result = await response.json();
-          const mode = result.data?.maintenance;
-
-          if (!mode?.enabled && !isAdmin) {
-            router.replace('/');
-            return;
-          }
-
-          setMaintenance(mode);
-        }
-      } catch (error) {
-        console.error('检查维护模式失败:', error);
-      } finally {
-        setLoading(false);
       }
-    };
 
+      const response = await fetch('/api/system/status');
+      if (response.ok) {
+        const result = await response.json();
+        const mode = result.data?.maintenance;
+
+        if (!mode?.enabled && !isAdminRef.current) {
+          router.replace('/');
+          return;
+        }
+
+        setMaintenance(mode);
+      }
+    } catch (error) {
+      console.error('检查维护模式失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
     checkStatus();
-    const interval = setInterval(checkStatus, 10000);
+    const interval = setInterval(checkStatus, 5000);
     return () => clearInterval(interval);
-  }, [router, isAdmin]);
+  }, [checkStatus]);
 
   const handleGoHome = () => {
     router.push('/');

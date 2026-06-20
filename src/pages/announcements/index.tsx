@@ -17,6 +17,7 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { fetchWithAuth } from '@/lib/api';
+import { emitSystemStatusChange } from '@/lib/system-status-events';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import type { SystemAnnouncement, AnnouncementLevel } from '@/types/announcement';
 import { ANNOUNCEMENT_LEVELS } from '@/types/announcement';
@@ -91,6 +92,7 @@ export default function AnnouncementManagement() {
       if (response.ok) {
         message.success('删除成功');
         fetchAnnouncements();
+        emitSystemStatusChange();
       } else {
         message.error('删除失败');
       }
@@ -129,6 +131,7 @@ export default function AnnouncementManagement() {
         message.success(editingId ? '更新成功' : '创建成功');
         setModalVisible(false);
         fetchAnnouncements();
+        emitSystemStatusChange();
       } else {
         const result = await response.json();
         message.error(result.error?.message || '操作失败');
