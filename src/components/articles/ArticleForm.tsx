@@ -1,13 +1,13 @@
-import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Badge, Button } from 'antd';
+import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Button } from 'antd';
 import { useRouter } from 'next/router';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
-import { WarningOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import type { Article, ArticleFormData, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { fetchWithAuth } from '@/lib/api';
 import { detectSensitiveWords, getLevelColor, getLevelLabel, getCategoryLabel, getStrategyLabel } from '@/lib/api-sensitive-word';
-import type { SensitiveWordDetectionResult, SensitiveWordMatch } from '@/types/sensitive-word';
+import type { SensitiveWordDetectionResult } from '@/types/sensitive-word';
 import { getAllCategories } from '@/lib/api-category';
 import type { Category } from '@/types/category';
 
@@ -158,7 +158,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
       <Alert
         icon={<WarningOutlined />}
         message={alertMessage}
-        type={alertType as any}
+        type={alertType}
         showIcon
         closable
         style={{ marginBottom: '16px' }}
@@ -189,7 +189,6 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
               <span style={{ fontWeight: 'bold' }}>{match.originalText}</span>
               <span style={{ marginLeft: '8px', fontSize: '12px', opacity: 0.8 }}>
                 [{getLevelLabel(match.level)}] [{getCategoryLabel(match.category)}] [{getStrategyLabel(match.strategy)}]
-                {(match as any).inTitle ? ' [标题]' : ''}
               </span>
             </Tag>
           ))}

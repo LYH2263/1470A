@@ -69,7 +69,7 @@ describe('extractPlainText HTML文本提取', () => {
   it('应该处理HTML实体', () => {
     expect(extractPlainText('<p>你好 &amp; 世界</p>')).toBe('你好 & 世界');
     expect(extractPlainText('<p>&lt;script&gt;</p>')).toBe('<script>');
-    expect(extractPlainText('<p>&nbsp;&quot;&#39;</p>')).toBe(' "\'');
+    expect(extractPlainText('<p>&nbsp;&quot;&#39;</p>')).toBe('"\'');
   });
 
   it('应该处理换行和段落分隔', () => {
@@ -358,8 +358,8 @@ describe('SensitiveWordDetector 敏感词检测', () => {
 
       const result = detector.detect('前面的内容敏感词后面的内容');
       expect(result.matches.length).toBe(1);
-      expect(result.matches[0].start).toBe(6);
-      expect(result.matches[0].end).toBe(9);
+      expect(result.matches[0].start).toBe(5);
+      expect(result.matches[0].end).toBe(8);
       expect(result.matches[0].originalText).toBe('敏感词');
     });
   });

@@ -1,7 +1,6 @@
-node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>18||(a===18&&b>=12)?1:0)"
-if [ $? -eq 0 ]; then
+if node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>18||(a===18&&b>=12)?1:0)"; then
   echo "Node.js < 18.12, skipping pre-commit checks"
   exit 0
 fi
 
-pnpm lint-staged
+node node_modules/lint-staged/bin/lint-staged.js

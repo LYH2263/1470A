@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { getToken, setToken as saveToken, removeToken } from '@/lib/api';
 
 interface User {
@@ -21,30 +21,33 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const USER_KEY = 'auth_user';
 
+function readStoredAuth(): { user: User | null; token: string | null } {
+  if (typeof window === 'undefined') {
+    return { user: null, token: null };
+  }
+
+  const storedToken = getToken();
+  const storedUser = localStorage.getItem(USER_KEY);
+
+  if (!storedToken || !storedUser) {
+    return { user: null, token: null };
+  }
+
+  try {
+    return { user: JSON.parse(storedUser), token: storedToken };
+  } catch (error) {
+    console.error('解析用户信息失败:', error);
+    removeToken();
+    localStorage.removeItem(USER_KEY);
+    return { user: null, token: null };
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // 初始化：从localStorage恢复认证状态
-  useEffect(() => {
-    const storedToken = getToken();
-    const storedUser = localStorage.getItem(USER_KEY);
-
-    if (storedToken && storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        setToken(storedToken);
-        setUser(parsedUser);
-      } catch (error) {
-        console.error('解析用户信息失败:', error);
-        removeToken();
-        localStorage.removeItem(USER_KEY);
-      }
-    }
-
-    setLoading(false);
-  }, []);
+  const initialAuth = readStoredAuth();
+  const [user, setUser] = useState<User | null>(initialAuth.user);
+  const [token, setToken] = useState<string | null>(initialAuth.token);
+  const [loading] = useState(false);
 
   const login = async (username: string, password: string) => {
     const response = await fetch('/api/auth/login', {

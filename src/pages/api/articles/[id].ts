@@ -103,7 +103,7 @@ async function handler(
       }
 
       // 4. 替换策略：将 replace 级别的敏感词替换为 ***
-      let finalData = { ...validationResult.data };
+      const finalData = { ...validationResult.data };
       if (contentDetection.matches.some(m => m.strategy === 'replace') || 
           titleDetection.matches.some(m => m.strategy === 'replace')) {
         const replaceMatch = (text: string, matches: typeof contentDetection.matches) => {

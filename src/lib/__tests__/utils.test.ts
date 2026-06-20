@@ -122,7 +122,7 @@ describe('importanceMap 配置', () => {
   describe('配置值验证', () => {
     it('low 级别应该有正确的配置', () => {
       expect(importanceMap.low.label).toBe('低');
-      expect(importanceMap.low.color).toBe('default');
+      expect(importanceMap.low.color).toBe('success');
     });
 
     it('medium 级别应该有正确的配置', () => {

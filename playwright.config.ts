@@ -43,7 +43,7 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        channel: 'chrome', // 使用系统安装的Chrome
+        ...(process.env.CI ? {} : { channel: 'chrome' }),
       },
     },
 
@@ -64,5 +64,9 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    env: {
+      DATABASE_URL: process.env.DATABASE_URL ?? 'file:./prisma/test.db',
+      JWT_SECRET: process.env.JWT_SECRET ?? 'test-secret-key-for-ci-min-32-chars-long',
+    },
   },
 });

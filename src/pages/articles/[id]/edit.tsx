@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Card, Spin, message, Button, Space, Alert, Tag, Modal, Tooltip } from 'antd';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Card, Spin, message, Button, Space, Alert, Tag, Modal, Tooltip, Skeleton } from 'antd';
 import { LockOutlined, UnlockOutlined, UserOutlined, WarningOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/router';
 import dayjs from 'dayjs';
@@ -22,6 +22,7 @@ export default function EditArticlePage() {
   const [loading, setLoading] = useState(true);
   const [article, setArticle] = useState<Article | null>(null);
   const [showStealConfirm, setShowStealConfirm] = useState(false);
+  const hasReleasedLockRef = useRef(false);
 
   const {
     lockStatus,
@@ -29,7 +30,6 @@ export default function EditArticlePage() {
     error: lockError,
     canEdit,
     currentLock,
-    acquireLock,
     releaseLock,
     stealLock,
     refreshLockStatus,
@@ -37,6 +37,7 @@ export default function EditArticlePage() {
     articleId: id as string,
     userId: user?.id || '',
     userRole: user?.role || '',
+    autoAcquire: true,
     onLockLost: () => {
       message.warning('您的编辑权限已丢失');
     },
@@ -49,25 +50,16 @@ export default function EditArticlePage() {
   const isLockedByOther = lockStatus?.isLocked && !lockStatus?.isLockedByMe;
 
   const handleBack = useCallback(async () => {
-    if (canEdit && article) {
+    if (canEdit && article && !hasReleasedLockRef.current) {
+      hasReleasedLockRef.current = true;
       await releaseLock();
     }
     router.back();
   }, [canEdit, article, releaseLock, router]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!canEdit) {
-      message.error('您没有编辑权限');
-      return;
-    }
-  }, [canEdit]);
-
   const handleStealLock = useCallback(async () => {
     setShowStealConfirm(false);
-    const success = await stealLock();
-    if (success) {
-      setArticle((prev) => prev ? { ...prev } : null);
-    }
+    await stealLock();
   }, [stealLock]);
 
   const handleConflict = useCallback((currentArticle: Article) => {
@@ -77,10 +69,14 @@ export default function EditArticlePage() {
   useEffect(() => {
     if (!id) return;
 
+    let cancelled = false;
+
     const fetchArticle = async () => {
       try {
         const response = await fetchWithAuth(`/api/articles/${id}`);
         const result = await response.json();
+
+        if (cancelled) return;
 
         if (result.success) {
           setArticle(result.data);
@@ -88,34 +84,27 @@ export default function EditArticlePage() {
           message.error(result.error || '获取文章失败');
         }
       } catch (error) {
+        if (cancelled) return;
         console.error('获取文章失败:', error);
         message.error('获取文章失败');
       } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchArticle();
-  }, [id]);
-
-  useEffect(() => {
-    if (!article || !user || lockLoading) return;
-
-    const tryAcquireLock = async () => {
-      if (!lockStatus?.isLocked) {
-        const acquired = await acquireLock();
-        if (!acquired) {
-          console.log('无法自动获取锁');
+        if (!cancelled) {
+          setLoading(false);
         }
       }
     };
 
-    tryAcquireLock();
-  }, [article, user, lockLoading, lockStatus?.isLocked, acquireLock]);
+    fetchArticle();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   useEffect(() => {
     const handleRouteChange = () => {
-      if (canEdit) {
+      if (canEdit && !hasReleasedLockRef.current) {
+        hasReleasedLockRef.current = true;
         releaseLock();
       }
     };
@@ -126,9 +115,7 @@ export default function EditArticlePage() {
     };
   }, [canEdit, releaseLock, router.events]);
 
-  const pageLoading = loading || lockLoading;
-
-  if (pageLoading) {
+  if (loading) {
     return (
       <MainLayout>
         <div style={{ padding: '24px', textAlign: 'center' }}>
@@ -149,7 +136,14 @@ export default function EditArticlePage() {
   }
 
   const renderLockStatus = () => {
-    if (!lockStatus) return null;
+    if (lockLoading || !lockStatus) {
+      return (
+        <Tag color="default">
+          <Spin size="small" style={{ marginRight: 8 }} />
+          加载中
+        </Tag>
+      );
+    }
 
     if (lockStatus.isLockedByMe) {
       return (
@@ -165,7 +159,9 @@ export default function EditArticlePage() {
           <Tag color="red" icon={<LockOutlined />}>
             {currentLock.user.name} 正在编辑
           </Tag>
-          <Tooltip title={`自 ${dayjs(currentLock.lastHeartbeat).format('HH:mm:ss')} 开始，将在 ${dayjs(currentLock.expiresAt).format('HH:mm:ss')} 过期`}>
+          <Tooltip
+            title={`自 ${dayjs(currentLock.lastHeartbeat).format('HH:mm:ss')} 开始，将在 ${dayjs(currentLock.expiresAt).format('HH:mm:ss')} 过期`}
+          >
             <Tag icon={<WarningOutlined />}>
               {dayjs(currentLock.expiresAt).fromNow()} 过期
             </Tag>
@@ -248,37 +244,32 @@ export default function EditArticlePage() {
           }
           extra={
             <Space>
-              {canEdit ? (
-                <Button
-                  type="primary"
-                  form="article-form"
-                  htmlType="submit"
-                  onClick={handleSubmit}
-                >
+              {lockLoading ? (
+                <Skeleton.Button active size="small" style={{ width: 64 }} />
+              ) : canEdit ? (
+                <Button type="primary" form="article-form" htmlType="submit">
                   保存
                 </Button>
-              ) : (
-                isLockedByOther && isAdmin && (
-                  <Button
-                    type="primary"
-                    danger
-                    onClick={() => setShowStealConfirm(true)}
-                  >
-                    强制夺锁
-                  </Button>
-                )
-              )}
+              ) : isLockedByOther && isAdmin ? (
+                <Button type="primary" danger onClick={() => setShowStealConfirm(true)}>
+                  强制夺锁
+                </Button>
+              ) : null}
               <Button onClick={handleBack}>返回</Button>
             </Space>
           }
         >
-          <ArticleForm
-            mode="edit"
-            initialValues={article}
-            formId="article-form"
-            readOnly={!canEdit}
-            onConflict={handleConflict}
-          />
+          {lockLoading ? (
+            <Skeleton active paragraph={{ rows: 8 }} />
+          ) : (
+            <ArticleForm
+              mode="edit"
+              initialValues={article}
+              formId="article-form"
+              readOnly={!canEdit}
+              onConflict={handleConflict}
+            />
+          )}
         </Card>
 
         <Modal

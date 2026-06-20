@@ -1,9 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMocks } from 'node-mocks-http';
 import type { NextApiRequest, NextApiResponse } from 'next';
-import handler from '@/pages/api/articles/index';
-import { createMockArticle, createMockArticles } from '@/test/factories';
+import { createMockArticle, createMockArticles, createMockArticleFormData } from '@/test/factories';
 import type { ApiResponse } from '@/types/article';
+
+vi.mock('@/lib/sensitive-word-storage', () => ({
+  getAllEnabledSensitiveWords: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('@/lib/sensitive-word-detector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/sensitive-word-detector')>();
+  const emptyDetection = {
+    matches: [],
+    shouldBlock: false,
+    blockReason: null,
+    replacedContent: '',
+    originalContent: '',
+    stats: {
+      totalMatches: 0,
+      highLevelCount: 0,
+      mediumLevelCount: 0,
+      lowLevelCount: 0,
+    },
+  };
+
+  return {
+    ...actual,
+    getGlobalDetector: vi.fn(() => ({
+      detect: vi.fn(() => emptyDetection),
+      setWords: vi.fn(),
+      getWords: vi.fn(() => []),
+    })),
+  };
+});
 
 // Mock storage functions
 vi.mock('@/lib/storage', () => ({
@@ -12,6 +41,7 @@ vi.mock('@/lib/storage', () => ({
   deleteArticles: vi.fn(),
 }));
 
+import handler from '@/pages/api/articles/index';
 import { getArticles, createArticle, deleteArticles } from '@/lib/storage';
 
 describe('API /api/articles - 完整测试套件', () => {
@@ -69,6 +99,8 @@ describe('API /api/articles - 完整测试套件', () => {
         page: 2,
         pageSize: 20,
         keyword: undefined,
+        categoryId: undefined,
+        status: 'published',
       });
     });
 
@@ -93,6 +125,8 @@ describe('API /api/articles - 完整测试套件', () => {
         page: 1,
         pageSize: 10,
         keyword: 'test',
+        categoryId: undefined,
+        status: 'published',
       });
     });
 
@@ -117,6 +151,8 @@ describe('API /api/articles - 完整测试套件', () => {
         page: 1,
         pageSize: 10,
         keyword: undefined,
+        categoryId: undefined,
+        status: 'published',
       });
     });
 
@@ -142,6 +178,8 @@ describe('API /api/articles - 完整测试套件', () => {
         page: 1,
         pageSize: 100,
         keyword: undefined,
+        categoryId: undefined,
+        status: 'published',
       });
     });
 
@@ -167,6 +205,8 @@ describe('API /api/articles - 完整测试套件', () => {
         page: 1,
         pageSize: 10,
         keyword: undefined,
+        categoryId: undefined,
+        status: 'published',
       });
     });
 
@@ -194,13 +234,12 @@ describe('API /api/articles - 完整测试套件', () => {
 
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'POST',
-        body: {
+        body: createMockArticleFormData({
           title: '测试标题',
           author: '测试作者',
-          createdAt: new Date().toISOString(),
           importance: 'medium',
           content: '测试内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -231,13 +270,12 @@ describe('API /api/articles - 完整测试套件', () => {
     it('应该拒绝空标题', async () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'POST',
-        body: {
+        body: createMockArticleFormData({
           title: '',
           author: '测试作者',
-          createdAt: new Date().toISOString(),
           importance: 'medium',
           content: '测试内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -250,13 +288,12 @@ describe('API /api/articles - 完整测试套件', () => {
     it('应该拒绝只包含空格的标题', async () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'POST',
-        body: {
+        body: createMockArticleFormData({
           title: '   ',
           author: '测试作者',
-          createdAt: new Date().toISOString(),
           importance: 'medium',
           content: '测试内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -270,11 +307,8 @@ describe('API /api/articles - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'POST',
         body: {
-          title: '测试标题',
-          author: '测试作者',
-          createdAt: new Date().toISOString(),
+          ...createMockArticleFormData(),
           importance: 'invalid',
-          content: '测试内容',
         },
       });
 
@@ -290,13 +324,12 @@ describe('API /api/articles - 完整测试套件', () => {
 
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'POST',
-        body: {
+        body: createMockArticleFormData({
           title: '测试标题',
           author: '测试作者',
-          createdAt: new Date().toISOString(),
           importance: 'medium',
           content: '测试内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -323,7 +356,7 @@ describe('API /api/articles - 完整测试套件', () => {
       const jsonData = JSON.parse(res._getData());
       expect(jsonData.success).toBe(true);
       expect(jsonData.data).toEqual({ deletedCount: 1 });
-      expect(deleteArticles).toHaveBeenCalledWith([validId]);
+      expect(deleteArticles).toHaveBeenCalledWith([validId], undefined);
     });
 
     it('应该成功批量删除多个文章', async () => {
@@ -345,7 +378,7 @@ describe('API /api/articles - 完整测试套件', () => {
       const jsonData = JSON.parse(res._getData());
       expect(jsonData.success).toBe(true);
       expect(jsonData.data).toEqual({ deletedCount: 3 });
-      expect(deleteArticles).toHaveBeenCalledWith(validIds);
+      expect(deleteArticles).toHaveBeenCalledWith(validIds, undefined);
     });
 
     it('应该验证 ID 格式（UUID）', async () => {
@@ -377,7 +410,7 @@ describe('API /api/articles - 完整测试套件', () => {
       const jsonData = JSON.parse(res._getData());
       expect(jsonData.success).toBe(true);
       // 应该只删除有效的 ID
-      expect(deleteArticles).toHaveBeenCalledWith([validId]);
+      expect(deleteArticles).toHaveBeenCalledWith([validId], undefined);
     });
 
     it('应该拒绝空数组', async () => {

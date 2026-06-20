@@ -11,6 +11,10 @@ vi.mock('../Sidebar', () => ({
   default: () => <div data-testid="sidebar">Sidebar</div>,
 }));
 
+vi.mock('@/components/announcements/AnnouncementBar', () => ({
+  default: () => null,
+}));
+
 describe('MainLayout 组件', () => {
   describe('渲染', () => {
     it('应该渲染顶部导航', () => {

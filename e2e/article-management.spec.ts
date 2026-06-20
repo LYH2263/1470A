@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers';
 
 /**
  * E2E测试: 文章管理完整流程
@@ -13,8 +14,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('文章管理系统 - 完整流程', () => {
   test.beforeEach(async ({ page }) => {
-    // 每个测试前访问首页
-    await page.goto('/');
+    await loginAsAdmin(page);
   });
 
   test('应该显示首页和文章列表', async ({ page }) => {

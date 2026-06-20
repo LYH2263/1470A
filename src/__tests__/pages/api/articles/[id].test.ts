@@ -1,9 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMocks } from 'node-mocks-http';
 import type { NextApiRequest, NextApiResponse } from 'next';
-import handler from '@/pages/api/articles/[id]';
-import { createMockArticle } from '@/test/factories';
+import { createMockArticle, createMockArticleFormData } from '@/test/factories';
 import type { ApiResponse } from '@/types/article';
+
+vi.mock('@/lib/sensitive-word-storage', () => ({
+  getAllEnabledSensitiveWords: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('@/lib/sensitive-word-detector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/sensitive-word-detector')>();
+  const emptyDetection = {
+    matches: [],
+    shouldBlock: false,
+    blockReason: null,
+    replacedContent: '',
+    originalContent: '',
+    stats: {
+      totalMatches: 0,
+      highLevelCount: 0,
+      mediumLevelCount: 0,
+      lowLevelCount: 0,
+    },
+  };
+
+  return {
+    ...actual,
+    getGlobalDetector: vi.fn(() => ({
+      detect: vi.fn(() => emptyDetection),
+      setWords: vi.fn(),
+      getWords: vi.fn(() => []),
+    })),
+  };
+});
 
 // Mock storage functions
 vi.mock('@/lib/storage', () => ({
@@ -13,6 +42,7 @@ vi.mock('@/lib/storage', () => ({
   updateArticleWithOptimisticLock: vi.fn(),
 }));
 
+import handler from '@/pages/api/articles/[id]';
 import { getArticleById, updateArticle, deleteArticles, updateArticleWithOptimisticLock } from '@/lib/storage';
 
 describe('API /api/articles/[id] - 完整测试套件', () => {
@@ -141,13 +171,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
         query: { id: validId },
-        body: {
+        body: createMockArticleFormData({
           title: '更新后的标题',
           author: '更新后的作者',
-          createdAt: new Date().toISOString(),
           importance: 'high',
           content: '更新后的内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -180,13 +209,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
         query: { id: validId },
-        body: {
+        body: createMockArticleFormData({
           title: '',
           author: '测试作者',
-          createdAt: new Date().toISOString(),
           importance: 'medium',
           content: '测试内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -200,13 +228,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
         query: { id: validId },
-        body: {
+        body: createMockArticleFormData({
           title: '   ',
           author: '测试作者',
-          createdAt: new Date().toISOString(),
           importance: 'medium',
           content: '测试内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -222,13 +249,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
         query: { id: validId },
-        body: {
+        body: createMockArticleFormData({
           title: '更新后的标题',
           author: '更新后的作者',
-          createdAt: new Date().toISOString(),
           importance: 'high',
           content: '更新后的内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -243,13 +269,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const mockArticle = createMockArticle({ id: validId });
       vi.mocked(updateArticle).mockResolvedValue(mockArticle);
 
-      const updateData = {
+      const updateData = createMockArticleFormData({
         title: '更新后的标题',
         author: '更新后的作者',
-        createdAt: new Date().toISOString(),
-        importance: 'high' as const,
+        importance: 'high',
         content: '更新后的内容',
-      };
+      });
 
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
@@ -269,13 +294,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
         query: { id: validId },
-        body: {
+        body: createMockArticleFormData({
           title: '更新后的标题',
           author: '更新后的作者',
-          createdAt: new Date().toISOString(),
           importance: 'high',
           content: '更新后的内容',
-        },
+        }),
       });
 
       await handler(req, res);
@@ -393,13 +417,13 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
 
   describe('数据一致性验证', () => {
     it('更新后的数据应该与输入一致', async () => {
-      const updateData = {
+      const updateData = createMockArticleFormData({
         title: '更新后的标题',
         author: '更新后的作者',
         createdAt: '2024-01-15T10:30:00.000Z',
-        importance: 'high' as const,
+        importance: 'high',
         content: '更新后的内容',
-      };
+      });
 
       const mockArticle = createMockArticle({
         id: validId,
@@ -438,11 +462,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
         method: 'PUT',
         query: { id: validId },
         body: {
-          title: '更新后的标题',
-          author: '更新后的作者',
-          createdAt: new Date().toISOString(),
-          importance: 'high',
-          content: '更新后的内容',
+          ...createMockArticleFormData({
+            title: '更新后的标题',
+            author: '更新后的作者',
+            importance: 'high',
+            content: '更新后的内容',
+          }),
           lastUpdatedAt,
         },
       });
@@ -469,11 +494,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
         method: 'PUT',
         query: { id: validId },
         body: {
-          title: '更新后的标题',
-          author: '更新后的作者',
-          createdAt: new Date().toISOString(),
-          importance: 'high',
-          content: '更新后的内容',
+          ...createMockArticleFormData({
+            title: '更新后的标题',
+            author: '更新后的作者',
+            importance: 'high',
+            content: '更新后的内容',
+          }),
           lastUpdatedAt,
         },
       });
@@ -494,13 +520,12 @@ describe('API /api/articles/[id] - 完整测试套件', () => {
       const { req, res } = createMocks<NextApiRequest, NextApiResponse<ApiResponse>>({
         method: 'PUT',
         query: { id: validId },
-        body: {
+        body: createMockArticleFormData({
           title: '更新后的标题',
           author: '更新后的作者',
-          createdAt: new Date().toISOString(),
           importance: 'high',
           content: '更新后的内容',
-        },
+        }),
       });
 
       await handler(req, res);

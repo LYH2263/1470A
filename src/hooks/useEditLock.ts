@@ -30,6 +30,7 @@ interface UseEditLockOptions {
   articleId: string;
   userId: string;
   userRole: string;
+  autoAcquire?: boolean;
   onLockLost?: () => void;
   onLockAcquired?: () => void;
 }
@@ -50,6 +51,7 @@ export function useEditLock({
   articleId,
   userId,
   userRole,
+  autoAcquire = true,
   onLockLost,
   onLockAcquired,
 }: UseEditLockOptions): UseEditLockReturn {
@@ -62,7 +64,26 @@ export function useEditLock({
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const isUnmountingRef = useRef(false);
   const sessionIdRef = useRef<string>('');
-  const scheduleHeartbeatRef = useRef<() => void>(() => {});
+  const isFetchingRef = useRef(false);
+  const isAcquiringRef = useRef(false);
+  const hasAutoAcquiredRef = useRef(false);
+  const currentArticleIdRef = useRef<string>('');
+
+  const onLockLostRef = useRef(onLockLost);
+  const onLockAcquiredRef = useRef(onLockAcquired);
+  const userRoleRef = useRef(userRole);
+
+  useEffect(() => {
+    onLockLostRef.current = onLockLost;
+  }, [onLockLost]);
+
+  useEffect(() => {
+    onLockAcquiredRef.current = onLockAcquired;
+  }, [onLockAcquired]);
+
+  useEffect(() => {
+    userRoleRef.current = userRole;
+  }, [userRole]);
 
   const clearHeartbeatTimer = useCallback(() => {
     if (heartbeatTimerRef.current) {
@@ -70,6 +91,67 @@ export function useEditLock({
       heartbeatTimerRef.current = null;
     }
   }, []);
+
+  const startHeartbeat = useCallback(() => {
+    clearHeartbeatTimer();
+
+    const heartbeat = async () => {
+      if (isUnmountingRef.current) return;
+      if (currentArticleIdRef.current !== articleId) return;
+
+      try {
+        const response = await fetchWithAuth(`/api/articles/${articleId}/lock`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId: sessionIdRef.current,
+          }),
+        });
+
+        const result = (await response.json()) as { data: HeartbeatResponse };
+
+        if (response.ok && result.data?.renewed) {
+          if (!isUnmountingRef.current && currentArticleIdRef.current === articleId) {
+            heartbeatTimerRef.current = setTimeout(
+              heartbeat,
+              LOCK_CONSTANTS.HEARTBEAT_INTERVAL_MS
+            );
+          }
+        } else {
+          message.warning('编辑锁已过期，页面将变为只读模式');
+          setLockStatus((prev) =>
+            prev ? { ...prev, isLockedByMe: false, isLocked: true } : null
+          );
+          setCurrentLock(null);
+          clearHeartbeatTimer();
+          onLockLostRef.current?.();
+
+          try {
+            const statusResponse = await fetchWithAuth(`/api/articles/${articleId}/lock`);
+            const statusResult = (await statusResponse.json()) as { data: LockStatus };
+            if (statusResponse.ok && statusResult.data && !isUnmountingRef.current) {
+              setLockStatus(statusResult.data);
+              setCurrentLock(statusResult.data.lock || null);
+            }
+          } catch (e) {
+            console.error('刷新锁状态失败:', e);
+          }
+        }
+      } catch (err) {
+        console.error('心跳失败:', err);
+        if (!isUnmountingRef.current && currentArticleIdRef.current === articleId) {
+          heartbeatTimerRef.current = setTimeout(
+            heartbeat,
+            LOCK_CONSTANTS.HEARTBEAT_INTERVAL_MS
+          );
+        }
+      }
+    };
+
+    heartbeatTimerRef.current = setTimeout(heartbeat, LOCK_CONSTANTS.HEARTBEAT_INTERVAL_MS);
+  }, [articleId, clearHeartbeatTimer]);
 
   const fetchLockStatus = useCallback(async () => {
     try {
@@ -95,67 +177,36 @@ export function useEditLock({
     setError(null);
 
     if (status.isLockedByMe && status.lock) {
-      setCurrentLock(status.lock);
-      scheduleHeartbeatRef.current();
+      if (!heartbeatTimerRef.current) {
+        startHeartbeat();
+      }
     } else {
       clearHeartbeatTimer();
     }
-  }, [clearHeartbeatTimer]);
-
-  const scheduleHeartbeat = useCallback(() => {
-    clearHeartbeatTimer();
-    heartbeatTimerRef.current = setTimeout(async () => {
-      if (isUnmountingRef.current) return;
-      try {
-        const response = await fetchWithAuth(`/api/articles/${articleId}/lock`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sessionId: sessionIdRef.current,
-          }),
-        });
-
-        const result = (await response.json()) as { data: HeartbeatResponse };
-
-        if (response.ok && result.data?.renewed) {
-          scheduleHeartbeatRef.current();
-        } else {
-          message.warning('编辑锁已过期，页面将变为只读模式');
-          setLockStatus((prev) => prev ? { ...prev, isLockedByMe: false, isLocked: true } : null);
-          setCurrentLock(null);
-          clearHeartbeatTimer();
-          onLockLost?.();
-          const status = await fetchLockStatus();
-          updateLockState(status);
-        }
-      } catch (err) {
-        console.error('心跳失败:', err);
-        scheduleHeartbeatRef.current();
-      }
-    }, LOCK_CONSTANTS.HEARTBEAT_INTERVAL_MS);
-  }, [articleId, clearHeartbeatTimer, onLockLost, fetchLockStatus, updateLockState]);
-
-  useEffect(() => {
-    scheduleHeartbeatRef.current = scheduleHeartbeat;
-  }, [scheduleHeartbeat]);
-
-  const refreshLockStatusInternal = useCallback(async () => {
-    const status = await fetchLockStatus();
-    updateLockState(status);
-  }, [fetchLockStatus, updateLockState]);
+  }, [startHeartbeat, clearHeartbeatTimer]);
 
   const refreshLockStatus = useCallback(async () => {
-    setIsLoading(true);
+    if (isFetchingRef.current) return;
+    if (currentArticleIdRef.current !== articleId) return;
+
+    isFetchingRef.current = true;
     try {
-      await refreshLockStatusInternal();
+      const status = await fetchLockStatus();
+      if (!isUnmountingRef.current && currentArticleIdRef.current === articleId) {
+        updateLockState(status);
+      }
     } finally {
-      setIsLoading(false);
+      if (!isUnmountingRef.current) {
+        isFetchingRef.current = false;
+      }
     }
-  }, [refreshLockStatusInternal]);
+  }, [articleId, fetchLockStatus, updateLockState]);
 
   const acquireLock = useCallback(async (): Promise<boolean> => {
+    if (isAcquiringRef.current) return false;
+    if (currentArticleIdRef.current !== articleId) return false;
+
+    isAcquiringRef.current = true;
     try {
       const response = await fetchWithAuth(`/api/articles/${articleId}/lock`, {
         method: 'POST',
@@ -167,19 +218,25 @@ export function useEditLock({
         }),
       });
 
-      const result = (await response.json()) as { data: AcquireLockResponse; error?: string };
+      const result = (await response.json()) as {
+        data: AcquireLockResponse;
+        error?: string;
+      };
 
       if (response.ok && result.data?.acquired && result.data.lock) {
-        setLockStatus({
+        const newStatus: LockStatus = {
           isLocked: true,
           isLockedByMe: true,
           lock: result.data.lock,
           expiresAt: result.data.lock.expiresAt,
-        });
+        };
+        setLockStatus(newStatus);
         setCurrentLock(result.data.lock);
         setError(null);
-        scheduleHeartbeat();
-        onLockAcquired?.();
+        if (!heartbeatTimerRef.current) {
+          startHeartbeat();
+        }
+        onLockAcquiredRef.current?.();
         broadcastChannelRef.current?.postMessage({
           type: 'LOCK_ACQUIRED',
           articleId,
@@ -187,16 +244,20 @@ export function useEditLock({
         });
         return true;
       } else {
-        setError(result.error || result.data?.error || '无法获取编辑锁');
-        await refreshLockStatusInternal();
+        const errorMsg = result.error || result.data?.error || '无法获取编辑锁';
+        setError(errorMsg);
         return false;
       }
     } catch (err) {
       console.error('申请锁失败:', err);
       setError('申请锁失败');
       return false;
+    } finally {
+      if (!isUnmountingRef.current) {
+        isAcquiringRef.current = false;
+      }
     }
-  }, [articleId, scheduleHeartbeat, onLockAcquired, refreshLockStatusInternal]);
+  }, [articleId, startHeartbeat]);
 
   const releaseLock = useCallback(async (): Promise<boolean> => {
     try {
@@ -214,7 +275,9 @@ export function useEditLock({
       const result = (await response.json()) as { data: ReleaseLockResponse };
 
       if (response.ok && result.data?.released) {
-        setLockStatus((prev) => prev ? { ...prev, isLockedByMe: false, isLocked: false } : null);
+        setLockStatus((prev) =>
+          prev ? { ...prev, isLockedByMe: false, isLocked: false } : null
+        );
         setCurrentLock(null);
         setError(null);
         broadcastChannelRef.current?.postMessage({
@@ -231,7 +294,7 @@ export function useEditLock({
   }, [articleId, clearHeartbeatTimer]);
 
   const stealLock = useCallback(async (): Promise<boolean> => {
-    if (userRole !== 'admin') {
+    if (userRoleRef.current !== 'admin') {
       setError('只有管理员可以强制夺锁');
       return false;
     }
@@ -247,19 +310,25 @@ export function useEditLock({
         }),
       });
 
-      const result = (await response.json()) as { data: StealLockResponse; error?: string };
+      const result = (await response.json()) as {
+        data: StealLockResponse;
+        error?: string;
+      };
 
       if (response.ok && result.data?.stolen && result.data.lock) {
-        setLockStatus({
+        const newStatus: LockStatus = {
           isLocked: true,
           isLockedByMe: true,
           lock: result.data.lock,
           expiresAt: result.data.lock.expiresAt,
-        });
+        };
+        setLockStatus(newStatus);
         setCurrentLock(result.data.lock);
         setError(null);
-        scheduleHeartbeat();
-        onLockAcquired?.();
+        if (!heartbeatTimerRef.current) {
+          startHeartbeat();
+        }
+        onLockAcquiredRef.current?.();
         broadcastChannelRef.current?.postMessage({
           type: 'LOCK_STOLEN',
           articleId,
@@ -276,7 +345,7 @@ export function useEditLock({
       setError('夺锁失败');
       return false;
     }
-  }, [articleId, userRole, scheduleHeartbeat, onLockAcquired]);
+  }, [articleId, startHeartbeat]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -288,38 +357,57 @@ export function useEditLock({
     if (!articleId || !userId) return;
 
     isUnmountingRef.current = false;
+    hasAutoAcquiredRef.current = false;
+    isFetchingRef.current = false;
+    isAcquiringRef.current = false;
+    currentArticleIdRef.current = articleId;
     setIsLoading(true);
+    setLockStatus(null);
+    setCurrentLock(null);
+    setError(null);
+    clearHeartbeatTimer();
 
-    refreshLockStatusInternal().finally(() => {
-      if (!isUnmountingRef.current) {
-        setIsLoading(false);
+    const initializeLock = async () => {
+      const status = await fetchLockStatus();
+
+      if (isUnmountingRef.current || currentArticleIdRef.current !== articleId) return;
+
+      updateLockState(status);
+      setIsLoading(false);
+
+      if (autoAcquire && status && !status.isLocked && !hasAutoAcquiredRef.current) {
+        hasAutoAcquiredRef.current = true;
+        await acquireLock();
       }
-    });
+    };
+
+    initializeLock();
 
     if (typeof BroadcastChannel !== 'undefined') {
       broadcastChannelRef.current = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
       broadcastChannelRef.current.onmessage = (event) => {
         if (event.data?.articleId !== articleId) return;
+        if (currentArticleIdRef.current !== articleId) return;
 
         switch (event.data.type) {
           case 'LOCK_ACQUIRED':
           case 'LOCK_STOLEN':
             if (event.data.lock?.userId !== userId) {
               message.warning(`${event.data.lock.user.name} 正在编辑此文章`);
-              setLockStatus({
+              const newStatus: LockStatus = {
                 isLocked: true,
                 isLockedByMe: false,
                 lock: event.data.lock,
                 expiresAt: event.data.lock.expiresAt,
-              });
+              };
+              setLockStatus(newStatus);
               setCurrentLock(event.data.lock);
-              if (lockStatus?.isLockedByMe) {
-                onLockLost?.();
-              }
+              clearHeartbeatTimer();
+              onLockLostRef.current?.();
             }
             break;
           case 'LOCK_RELEASED':
-            refreshLockStatusInternal();
+            refreshLockStatus();
             break;
         }
       };
@@ -340,12 +428,13 @@ export function useEditLock({
 
     return () => {
       isUnmountingRef.current = true;
+      hasAutoAcquiredRef.current = false;
       clearHeartbeatTimer();
       window.removeEventListener('beforeunload', handleBeforeUnload);
       broadcastChannelRef.current?.close();
       broadcastChannelRef.current = null;
     };
-  }, [articleId, userId, clearHeartbeatTimer, refreshLockStatusInternal, onLockLost]);
+  }, [articleId, userId, autoAcquire, clearHeartbeatTimer, fetchLockStatus, updateLockState, acquireLock, refreshLockStatus]);
 
   const canEdit = !!lockStatus?.isLockedByMe;
 

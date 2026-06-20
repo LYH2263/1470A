@@ -243,6 +243,14 @@ describe('Storage Layer - 数据正确性测试', () => {
 
       expect(prisma.article.findUnique).toHaveBeenCalledWith({
         where: { id },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       });
     });
   });
@@ -317,7 +325,17 @@ describe('Storage Layer - 数据正确性测试', () => {
           importance: formData.importance,
           content: formData.content,
           contentPlainText: expect.any(String),
+          status: formData.status,
           views: 0,
+          categoryId: formData.categoryId || null,
+        },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       });
     });
@@ -389,6 +407,16 @@ describe('Storage Layer - 数据正确性测试', () => {
           importance: formData.importance,
           content: formData.content,
           contentPlainText: expect.any(String),
+          status: formData.status,
+          categoryId: formData.categoryId || null,
+        },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       });
     });

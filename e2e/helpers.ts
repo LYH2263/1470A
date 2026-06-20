@@ -12,6 +12,14 @@ export const test = base.extend({
 
 export { expect } from '@playwright/test';
 
+export async function loginAsAdmin(page: Page) {
+  await page.goto('/login');
+  await page.fill('input[placeholder="用户名"]', 'admin');
+  await page.fill('input[placeholder="密码"]', 'admin123');
+  await page.click('button:has-text("登录")');
+  await page.waitForURL('/');
+}
+
 /**
  * 测试数据工厂
  */
@@ -38,7 +46,7 @@ export class ArticleListPage {
   constructor(private page: Page) {}
 
   async goto() {
-    await this.page.goto('/');
+    await loginAsAdmin(this.page);
   }
 
   async clickNewArticle() {
