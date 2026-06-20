@@ -31,6 +31,27 @@ export interface SensitiveWordMatch {
   originalText: string;
 }
 
+export interface HighlightSegment {
+  plainStart: number;
+  plainEnd: number;
+  htmlStart: number;
+  htmlEnd: number;
+  level: SensitiveWordLevel;
+  word: string;
+  originalText: string;
+  overlapsTag: boolean;
+  highlightClass: string;
+  backgroundColor: string;
+  borderColor: string;
+}
+
+export interface QuillHighlightRange {
+  index: number;
+  length: number;
+  level: SensitiveWordLevel;
+  word: string;
+}
+
 export interface SensitiveWordDetectionResult {
   matches: SensitiveWordMatch[];
   shouldBlock: boolean;
@@ -43,6 +64,9 @@ export interface SensitiveWordDetectionResult {
     mediumLevelCount: number;
     lowLevelCount: number;
   };
+  highlights?: HighlightSegment[];
+  quillRanges?: QuillHighlightRange[];
+  highlightedHtml?: string;
 }
 
 export interface SensitiveWordCreateInput {

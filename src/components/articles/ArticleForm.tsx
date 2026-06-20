@@ -1,13 +1,13 @@
-import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Button } from 'antd';
+import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Button, Tooltip } from 'antd';
 import { useRouter } from 'next/router';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
-import { WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import RichTextEditor from '@/components/common/RichTextEditor';
+import { WarningOutlined, CheckCircleOutlined, AimOutlined } from '@ant-design/icons';
+import RichTextEditor, { type RichTextEditorApi } from '@/components/common/RichTextEditor';
 import type { Article, ArticleFormData, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { fetchWithAuth } from '@/lib/api';
 import { detectSensitiveWords, getLevelColor, getLevelLabel, getCategoryLabel, getStrategyLabel } from '@/lib/api-sensitive-word';
-import type { SensitiveWordDetectionResult } from '@/types/sensitive-word';
+import type { SensitiveWordDetectionResult, SensitiveWordMatch, QuillHighlightRange } from '@/types/sensitive-word';
 import { getAllCategories } from '@/lib/api-category';
 import type { Category } from '@/types/category';
 
@@ -38,11 +38,167 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
 
   const [detectionResult, setDetectionResult] = useState<SensitiveWordDetectionResult | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
-  const [showMatchList, setShowMatchList] = useState(false);
+  const [showMatchList, setShowMatchList] = useState(true);
+  const [editorApi, setEditorApi] = useState<RichTextEditorApi | null>(null);
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const contentRef = useRef<string>('');
   const titleRef = useRef<string>('');
+
+  const titleMatches = useMemo<SensitiveWordMatch[]>(() => {
+    return detectionResult?.matches.filter(m => (m as any).inTitle) || [];
+  }, [detectionResult]);
+
+  const contentMatches = useMemo<SensitiveWordMatch[]>(() => {
+    return detectionResult?.matches.filter(m => !(m as any).inTitle) || [];
+  }, [detectionResult]);
+
+  const contentHighlightRanges = useMemo<QuillHighlightRange[]>(() => {
+    const ranges = detectionResult?.quillRanges;
+    if (ranges && ranges.length > 0) {
+      return ranges as QuillHighlightRange[];
+    }
+    // 兼容后端未返回的情况：这里只处理正文内容
+    // 用 plain 索引，但实际高亮推荐用 quillRanges（detect API 会返回）
+    const contentMatchesOnly = detectionResult?.matches.filter(m => !(m as any).inTitle) || [];
+    return contentMatchesOnly.map(m => ({
+      index: m.start,
+      length: m.end - m.start,
+      level: m.level,
+      word: m.word,
+    }));
+  }, [detectionResult]);
+
+  useEffect(() => {
+    if (editorApi && contentHighlightRanges) {
+      editorApi.setSensitiveHighlights(contentHighlightRanges as any);
+    }
+  }, [editorApi, contentHighlightRanges]);
+
+  const jumpToMatch = useCallback((match: SensitiveWordMatch, inTitle: boolean) => {
+    if (inTitle) {
+      const el = document.querySelector<HTMLInputElement>('input#title_input');
+      if (el) {
+        el.focus();
+        const start = match.start;
+        const end = match.end;
+        if (typeof el.setSelectionRange === 'function') {
+          try { el.setSelectionRange(start, end); } catch (e) {}
+        }
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+    if (!editorApi || !detectionResult?.quillRanges) {
+      editorApi?.scrollToRange(match.start, match.end - match.start);
+      return;
+    }
+    const idx = detectionResult.matches.findIndex(m => m === match || (m.start === match.start && m.end === match.end && m.word === match.word));
+    if (idx >= 0 && detectionResult.quillRanges[idx]) {
+      const r = detectionResult.quillRanges[idx];
+      editorApi.scrollToRange(r.index, r.length);
+    } else {
+      editorApi.scrollToRange(match.start, match.end - match.start);
+    }
+  }, [editorApi, detectionResult]);
+
+  const getStrategyColor = (strategy: string): string => {
+    if (strategy === 'block') return 'red';
+    if (strategy === 'replace') return 'orange';
+    return 'blue';
+  };
+
+  const getLevelBgColor = (level: string): string => {
+    if (level === 'high') return '#fff1f0';
+    if (level === 'medium') return '#fffbe6';
+    return '#f6ffed';
+  };
+
+  const renderTitleInputWithHighlight = () => {
+    if (titleMatches.length === 0) {
+      return (
+        <Input
+          id="title_input"
+          placeholder="请输入文章标题"
+          onChange={handleTitleChange}
+        />
+      );
+    }
+    return (
+      <div style={{ position: 'relative' }}>
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            padding: '5px 11px',
+            fontSize: '14px',
+            lineHeight: '1.5715',
+            whiteSpace: 'pre-wrap',
+            wordWrap: 'break-word',
+            color: 'transparent',
+            pointerEvents: 'none',
+            overflow: 'hidden',
+            minHeight: '32px',
+            zIndex: 1,
+            boxSizing: 'border-box',
+          }}
+        >
+          {renderHighlightedTitle()}
+        </div>
+        <Input
+          id="title_input"
+          placeholder="请输入文章标题"
+          onChange={handleTitleChange}
+          style={{
+            position: 'relative',
+            zIndex: 2,
+            background: 'transparent',
+            caretColor: '#000',
+          }}
+        />
+      </div>
+    );
+  };
+
+  const renderHighlightedTitle = () => {
+    if (!titleMatches || titleMatches.length === 0) {
+      return <span>{titleRef.current}</span>;
+    }
+    const title = titleRef.current;
+    const sorted = [...titleMatches].sort((a, b) => a.start - b.start);
+    const nodes: React.ReactNode[] = [];
+    let lastIdx = 0;
+    let vi = 0;
+    for (const m of sorted) {
+      if (m.start < lastIdx) continue;
+      if (m.start > lastIdx) {
+        nodes.push(
+          <span key={`text-${vi++}`}>{title.slice(lastIdx, m.start)}</span>
+        );
+      }
+      nodes.push(
+        <span
+          key={`hl-${vi++}`}
+          style={{
+            backgroundColor: getLevelBgColor(m.level),
+            border: `1px dashed ${getLevelColor(m.level) === 'error' ? '#f5222d' : getLevelColor(m.level) === 'warning' ? '#faad14' : '#8c8c8c'}`,
+            borderRadius: '3px',
+            padding: '0 2px',
+          }}
+        >
+          {title.slice(m.start, m.end)}
+        </span>
+      );
+      lastIdx = m.end;
+    }
+    if (lastIdx < title.length) {
+      nodes.push(<span key={`text-${vi++}`}>{title.slice(lastIdx)}</span>);
+    }
+    return nodes;
+  };
 
   const showConflictModal = (currentArticle: Article) => {
     Modal.confirm({
@@ -176,23 +332,93 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
       return null;
     }
 
-    return (
-      <div style={{ marginBottom: '16px', padding: '12px', background: '#fafafa', borderRadius: '4px' }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>敏感词命中详情：</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-          {detectionResult.matches.map((match, index) => (
-            <Tag
-              key={index}
-              color={getLevelColor(match.level)}
-              style={{ padding: '4px 8px' }}
-            >
-              <span style={{ fontWeight: 'bold' }}>{match.originalText}</span>
-              <span style={{ marginLeft: '8px', fontSize: '12px', opacity: 0.8 }}>
-                [{getLevelLabel(match.level)}] [{getCategoryLabel(match.category)}] [{getStrategyLabel(match.strategy)}]
-              </span>
+    const renderMatchItem = (match: SensitiveWordMatch, inTitle: boolean, idx: number) => (
+      <div
+        key={`${inTitle ? 't' : 'c'}-${idx}`}
+        style={{
+          padding: '8px 12px',
+          background: '#fff',
+          border: `1px solid ${getLevelColor(match.level) === 'error' ? '#f5222d' : getLevelColor(match.level) === 'warning' ? '#faad14' : '#8c8c8c'}`,
+          borderRadius: '4px',
+          marginBottom: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div style={{ marginBottom: '4px' }}>
+            <Tag color={getLevelColor(match.level)}>
+              {getLevelLabel(match.level)}
             </Tag>
-          ))}
+            <Tag>{getCategoryLabel(match.category)}</Tag>
+            <Tag color={getStrategyColor(match.strategy)}>{getStrategyLabel(match.strategy)}</Tag>
+            {inTitle && <Tag color="geekblue">标题</Tag>}
+          </div>
+          <div>
+            <span style={{
+              fontWeight: 'bold',
+              background: getLevelBgColor(match.level),
+              padding: '2px 6px',
+              borderRadius: '3px',
+              border: `1px dashed ${getLevelColor(match.level) === 'error' ? '#f5222d' : getLevelColor(match.level) === 'warning' ? '#faad14' : '#8c8c8c'}`,
+            }}>
+              {match.originalText}
+            </span>
+            <span style={{ marginLeft: '8px', color: '#999', fontSize: '12px' }}>
+              位置: {match.start}-{match.end}
+            </span>
+          </div>
         </div>
+        <Tooltip title={inTitle ? '定位到标题' : '在编辑器中定位'}>
+          <Button
+            type="text"
+            size="small"
+            icon={<AimOutlined />}
+            onClick={() => jumpToMatch(match, inTitle)}
+          >
+            定位
+          </Button>
+        </Tooltip>
+      </div>
+    );
+
+    return (
+      <div style={{ marginBottom: '16px', padding: '12px 16px', background: '#fafafa', borderRadius: '6px' }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '12px',
+          fontWeight: 600,
+        }}>
+          <span>
+            <WarningOutlined style={{ color: '#faad14', marginRight: '8px' }} />
+            敏感词命中详情（共 {detectionResult.stats.totalMatches} 个）
+          </span>
+          <Button size="small" type="link" onClick={() => setShowMatchList(false)}>收起</Button>
+        </div>
+
+        {titleMatches.length > 0 && (
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ fontWeight: 500, marginBottom: '8px', color: '#262626' }}>
+              标题命中 ({titleMatches.length})
+            </div>
+            {titleMatches.map((m, i) => renderMatchItem(m, true, i))}
+          </div>
+        )}
+
+        {contentMatches.length > 0 && (
+          <div>
+            <div style={{ fontWeight: 500, marginBottom: '8px', color: '#262626' }}>
+              正文命中 ({contentMatches.length})
+              <span style={{ fontWeight: 400, marginLeft: '8px', color: '#8c8c8c', fontSize: '12px' }}>
+                （已在编辑器中高亮显示，点击「定位」可跳转）
+              </span>
+            </div>
+            {contentMatches.map((m, i) => renderMatchItem(m, false, i))}
+          </div>
+        )}
       </div>
     );
   };
@@ -289,7 +515,7 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
           { max: 200, message: '标题不能超过200个字符' },
         ]}
       >
-        <Input placeholder="请输入文章标题" onChange={handleTitleChange} />
+        {renderTitleInputWithHighlight()}
       </Form.Item>
 
       <Form.Item
@@ -358,10 +584,12 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
         name="content"
         rules={[{ required: true, message: '请输入内容' }]}
       >
-        <RichTextEditor 
-          placeholder="请输入文章内容" 
-          readOnly={readOnly} 
+        <RichTextEditor
+          placeholder="请输入文章内容"
+          readOnly={readOnly}
           onChange={handleContentChange}
+          onEditorReady={(api) => setEditorApi(api)}
+          highlightRanges={contentHighlightRanges as any}
         />
       </Form.Item>
     </Form>

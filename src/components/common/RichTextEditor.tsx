@@ -21,6 +21,26 @@ interface RichTextEditorProps {
   placeholder?: string;
   readOnly?: boolean;
   height?: number;
+  highlightRanges?: Array<{
+    index: number;
+    length: number;
+    level: string;
+    word: string;
+  }>;
+  onEditorReady?: (api: RichTextEditorApi) => void;
+}
+
+export interface RichTextEditorApi {
+  getQuill: () => any;
+  getInnerHTML: () => string;
+  setSensitiveHighlights: (ranges: Array<{
+    index: number;
+    length: number;
+    level: string;
+    word: string;
+  }>) => void;
+  clearSensitiveHighlights: () => void;
+  scrollToRange: (index: number, length: number) => void;
 }
 
 interface PendingImage {
@@ -36,6 +56,8 @@ export default function RichTextEditor({
   placeholder,
   readOnly = false,
   height,
+  highlightRanges = [],
+  onEditorReady,
 }: RichTextEditorProps) {
   const [mounted, setMounted] = useState(false);
   const [toolbarConfig, setToolbarConfig] = useState<any[]>(DEFAULT_TOOLBAR_CONFIG);
@@ -52,10 +74,18 @@ export default function RichTextEditor({
   const hljsRef = useRef<any>(null);
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const onChangeRef = useRef(onChange);
+  const onEditorReadyRef = useRef(onEditorReady);
+  const appliedHighlightSpansRef = useRef<Array<{ id: string; range: any; format: any }>>([]);
+  const quillFormatRegisteredRef = useRef(false);
+  const handlePasteRef = useRef<(e: ClipboardEvent) => Promise<void>>(async () => {});
 
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    onEditorReadyRef.current = onEditorReady;
+  }, [onEditorReady]);
 
   useEffect(() => {
     setMounted(true);
@@ -129,13 +159,178 @@ export default function RichTextEditor({
 
     quillInstanceRef.current = quill;
 
+    if (!quillFormatRegisteredRef.current && typeof window !== 'undefined') {
+      quillFormatRegisteredRef.current = true;
+      import('quill').then(({ default: Quill }: any) => {
+        const Inline = Quill.import('blots/inline');
+        class SensitiveHlBlot extends Inline {
+          static create(value: any) {
+            const node = super.create();
+            if (value?.level) {
+              node.setAttribute('data-sensitive-level', value.level);
+              node.setAttribute('data-sensitive-word', value.word || '');
+              const colors: any = {
+                high: { bg: '#ffebee', bd: '#ef5350' },
+                medium: { bg: '#fff8e1', bd: '#ffa726' },
+                low: { bg: '#e8f5e9', bd: '#66bb6a' },
+              };
+              const c = colors[value.level] || colors.low;
+              node.style.backgroundColor = c.bg;
+              node.style.border = `1px solid ${c.bd}`;
+              node.style.borderRadius = '2px';
+              node.style.padding = '0 2px';
+            }
+            return node;
+          }
+          static formats(node: any) {
+            return {
+              level: node.getAttribute('data-sensitive-level'),
+              word: node.getAttribute('data-sensitive-word'),
+            };
+          }
+          format(name: string, value: any) {
+            if (name === 'sensitive-hl') {
+              if (value === false) {
+                if (this.domNode) {
+                  this.domNode.removeAttribute('data-sensitive-level');
+                  this.domNode.removeAttribute('data-sensitive-word');
+                  this.domNode.style.backgroundColor = '';
+                  this.domNode.style.border = '';
+                  this.domNode.style.borderRadius = '';
+                  this.domNode.style.padding = '';
+                }
+              } else if (value && this.domNode) {
+                this.domNode.setAttribute('data-sensitive-level', value.level);
+                this.domNode.setAttribute('data-sensitive-word', value.word || '');
+                const colors: any = {
+                  high: { bg: '#ffebee', bd: '#ef5350' },
+                  medium: { bg: '#fff8e1', bd: '#ffa726' },
+                  low: { bg: '#e8f5e9', bd: '#66bb6a' },
+                };
+                const c = colors[value.level] || colors.low;
+                this.domNode.style.backgroundColor = c.bg;
+                this.domNode.style.border = `1px solid ${c.bd}`;
+                this.domNode.style.borderRadius = '2px';
+                this.domNode.style.padding = '0 2px';
+              }
+            } else {
+              super.format(name, value);
+            }
+          }
+        }
+        (SensitiveHlBlot as any).blotName = 'sensitive-hl';
+        (SensitiveHlBlot as any).tagName = 'span';
+        (SensitiveHlBlot as any).className = 'sensitive-word-highlight';
+        try {
+          Quill.register(SensitiveHlBlot, true);
+        } catch (e) {
+          // format already registered
+        }
+      }).catch(e => console.warn('Quill import failed for hl blot:', e));
+    }
+
     quill.on('text-change', () => {
       highlightCodeBlocks();
       onChangeRef.current?.(quill.root.innerHTML);
     });
 
-    quill.root.addEventListener('paste', handlePaste);
+    quill.root.addEventListener('paste', (e: any) => handlePasteRef.current?.(e));
+
+    if (onEditorReadyRef.current) {
+      const api: RichTextEditorApi = {
+        getQuill: () => quillInstanceRef.current,
+        getInnerHTML: () => quillInstanceRef.current?.root?.innerHTML || '',
+        setSensitiveHighlights: (ranges) => {
+          applySensitiveHighlights(ranges);
+        },
+        clearSensitiveHighlights: () => {
+          clearSensitiveHighlights();
+        },
+        scrollToRange: (index, length) => {
+          const q = quillInstanceRef.current;
+          if (!q) return;
+          try {
+            q.setSelection(index, length, 'silent');
+            const leaf = q.getLeaf(index);
+            if (leaf && leaf[0]) {
+              const node = leaf[0].domNode;
+              if (node && node.scrollIntoView) {
+                node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }
+          } catch (e) { /* ignore */ }
+        },
+      };
+      onEditorReadyRef.current(api);
+    }
   }, [highlightCodeBlocks]);
+
+  const clearSensitiveHighlights = useCallback(() => {
+    const quill = quillInstanceRef.current;
+    if (!quill) return;
+    try {
+      const delta = quill.getContents();
+      const newOps: any[] = [];
+      for (const op of delta.ops || []) {
+        if (op.attributes && op.attributes['sensitive-hl']) {
+          const { 'sensitive-hl': _hl, ...restAttrs } = op.attributes;
+          const hasOther = Object.keys(restAttrs).length > 0;
+          newOps.push({
+            ...op,
+            attributes: hasOther ? restAttrs : undefined,
+          });
+        } else {
+          newOps.push(op);
+        }
+      }
+      const sel = quill.getSelection();
+      quill.setContents(newOps, 'silent');
+      if (sel) {
+        try { quill.setSelection(sel, 'silent'); } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('clearSensitiveHighlights failed:', e);
+    }
+    appliedHighlightSpansRef.current = [];
+  }, []);
+
+  const applySensitiveHighlights = useCallback((
+    ranges: Array<{ index: number; length: number; level: string; word: string }>
+  ) => {
+    const quill = quillInstanceRef.current;
+    if (!quill) return;
+    clearSensitiveHighlights();
+    if (!ranges || ranges.length === 0) return;
+    try {
+      const sel = quill.getSelection();
+      const sorted = [...ranges].sort((a, b) => b.index - a.index);
+      for (const r of sorted) {
+        if (r.index < 0 || r.length <= 0) continue;
+        try {
+          quill.formatText(
+            r.index,
+            r.length,
+            'sensitive-hl',
+            { level: r.level, word: r.word },
+            'silent'
+          );
+        } catch (e) {
+          console.warn('format range failed:', r, e);
+        }
+      }
+      if (sel) {
+        try { quill.setSelection(sel, 'silent'); } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('applySensitiveHighlights failed:', e);
+    }
+  }, [clearSensitiveHighlights]);
+
+  useEffect(() => {
+    if (quillInstanceRef.current && highlightRanges) {
+      applySensitiveHighlights(highlightRanges);
+    }
+  }, [highlightRanges, applySensitiveHighlights]);
 
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
     if (readOnly || !quillInstanceRef.current) return;
@@ -161,6 +356,10 @@ export default function RichTextEditor({
       uploadImages(imageFiles);
     }
   }, [readOnly]);
+
+  useEffect(() => {
+    handlePasteRef.current = handlePaste;
+  }, [handlePaste]);
 
   const uploadImages = useCallback((files: File[]) => {
     if (!quillInstanceRef.current || !uploadQueueRef.current) return;
@@ -454,6 +653,7 @@ export default function RichTextEditor({
       'table-row',
       'table-cell',
       'better-table',
+      'sensitive-hl',
     ],
     []
   );

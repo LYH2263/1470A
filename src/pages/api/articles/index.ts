@@ -86,6 +86,19 @@ async function handler(
       const titleDetection = detector.detect(validationResult.data.title);
       const contentDetection = detector.detect(validationResult.data.content);
 
+      const contentHighlights = detector.buildHighlightSegments(
+        validationResult.data.content,
+        contentDetection.matches
+      );
+      const contentQuillRanges = detector.getQuillHighlightRanges(
+        validationResult.data.content,
+        contentDetection.matches
+      );
+      const highlightedHtml = detector.wrapHighlightInHtml(
+        validationResult.data.content,
+        contentHighlights
+      );
+
       const allMatches = [...titleDetection.matches, ...contentDetection.matches];
       const detectionResult: SensitiveWordDetectionResult = {
         matches: allMatches,
@@ -99,6 +112,9 @@ async function handler(
           mediumLevelCount: titleDetection.stats.mediumLevelCount + contentDetection.stats.mediumLevelCount,
           lowLevelCount: titleDetection.stats.lowLevelCount + contentDetection.stats.lowLevelCount,
         },
+        highlights: contentHighlights,
+        quillRanges: contentQuillRanges,
+        highlightedHtml,
       };
 
       // 3. 阻断策略：有 block 级别的敏感词则阻止发布
@@ -112,30 +128,21 @@ async function handler(
         });
       }
 
-      // 4. 替换策略：将 replace 级别的敏感词替换为 ***
+      // 4. 替换策略：统一使用新的 replaceInHtml / replaceInPlainText
       const finalData = { ...validationResult.data };
-      if (contentDetection.matches.some(m => m.strategy === 'replace')) {
-        const replaceMatch = (text: string, matches: typeof contentDetection.matches) => {
-          const replaceable = matches.filter(m => m.strategy === 'replace');
-          if (replaceable.length === 0) return text;
-          
-          let result = '';
-          let lastIndex = 0;
-          const sorted = [...replaceable].sort((a, b) => a.start - b.start);
-          
-          for (const match of sorted) {
-            if (match.start >= lastIndex) {
-              result += text.slice(lastIndex, match.start);
-              result += '*'.repeat(match.end - match.start);
-              lastIndex = match.end;
-            }
-          }
-          result += text.slice(lastIndex);
-          return result;
-        };
-        
-        finalData.content = replaceMatch(validationResult.data.content, contentDetection.matches);
-        finalData.title = replaceMatch(validationResult.data.title, titleDetection.matches);
+      const hasReplace = 
+        titleDetection.matches.some(m => m.strategy === 'replace') ||
+        contentDetection.matches.some(m => m.strategy === 'replace');
+
+      if (hasReplace) {
+        finalData.title = detector.replaceInPlainText(
+          validationResult.data.title,
+          titleDetection.matches
+        );
+        finalData.content = detector.replaceInHtml(
+          validationResult.data.content,
+          contentDetection.matches
+        );
       }
 
       // 5. 保存文章

@@ -41,11 +41,18 @@ async function handler(
     }
 
     const contentResult = detector.detect(content);
+    const contentHighlights = detector.buildHighlightSegments(content, contentResult.matches);
+    const contentQuillRanges = detector.getQuillHighlightRanges(content, contentResult.matches);
+    const highlightedHtml = detector.wrapHighlightInHtml(content, contentHighlights);
+    (contentResult as any).highlights = contentHighlights;
+    (contentResult as any).quillRanges = contentQuillRanges;
+    (contentResult as any).highlightedHtml = highlightedHtml;
 
+    let titleHighlights: any[] = [];
     if (checkTitle && title) {
       const titleResult = detector.detect(title);
       contentResult.matches = [
-        ...titleResult.matches.map(m => ({ ...m, inTitle: true })),
+        ...titleResult.matches.map((m: any) => ({ ...m, inTitle: true })),
         ...contentResult.matches,
       ];
       contentResult.stats.totalMatches += titleResult.stats.totalMatches;
