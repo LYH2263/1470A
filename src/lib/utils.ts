@@ -2,6 +2,7 @@ import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import DOMPurify from 'isomorphic-dompurify';
 import { VIDEO_EMBED_WHITELIST, DOMPURIFY_ADDONS, DEFAULT_TOOLBAR_CONFIG } from './constants';
+import { fetchWithAuth } from './api';
 
 // 合并 Tailwind CSS 类名
 export function cn(...inputs: ClassValue[]) {

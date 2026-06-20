@@ -25,9 +25,10 @@ interface RichTextEditorProps {
 
 interface PendingImage {
   id: string;
-  index: number;
-  length: number;
+  placeholderIndex: number;
 }
+
+const PLACEHOLDER_IMAGE = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZWVlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5Ij7kuIrvvIbljJbml6YjmsYTnoJTmsYTor73pgJrnmoTlpI3lj5HpgJrkuK3ljYc8L3RleHQ+PC9zdmc+';
 
 export default function RichTextEditor({
   value = '',
@@ -37,7 +38,6 @@ export default function RichTextEditor({
   height,
 }: RichTextEditorProps) {
   const [mounted, setMounted] = useState(false);
-  const [quillInstance, setQuillInstance] = useState<any>(null);
   const [toolbarConfig, setToolbarConfig] = useState<any[]>(DEFAULT_TOOLBAR_CONFIG);
   const [showToolbarConfig, setShowToolbarConfig] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -46,8 +46,16 @@ export default function RichTextEditor({
   const [codeLanguage, setCodeLanguage] = useState('javascript');
 
   const quillRef = useRef<any>(null);
+  const quillInstanceRef = useRef<any>(null);
   const uploadQueueRef = useRef<UploadQueue | null>(null);
-  const pendingImagesRef = useRef<PendingImage[]>([]);
+  const pendingImagesRef = useRef<Map<string, PendingImage>>(new Map());
+  const hljsRef = useRef<any>(null);
+  const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     setMounted(true);
@@ -66,44 +74,71 @@ export default function RichTextEditor({
 
     return () => {
       uploadQueueRef.current?.clear();
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
     };
   }, []);
 
-  const handleQuillReady = useCallback(() => {
-    if (quillRef.current) {
-      // @ts-ignore
-      const quill = quillRef.current.getEditor();
-      setQuillInstance(quill);
-
-      if (typeof window !== 'undefined') {
-        import('highlight.js').then((module) => {
-          const hljs = module.default || module;
-          quill?.on('text-change', () => {
-            const codeBlocks = document.querySelectorAll('.ql-code-block-container');
-            codeBlocks.forEach((block) => {
-              const codeElement = block.querySelector('code');
-              if (codeElement && !codeElement.classList.contains('hljs')) {
-                try {
-                  if (typeof hljs.highlightElement === 'function') {
-                    hljs.highlightElement(codeElement as HTMLElement);
-                  } else if (typeof hljs.highlightBlock === 'function') {
-                    hljs.highlightBlock(codeElement as HTMLElement);
-                  }
-                } catch (e) {
-                  // 忽略高亮错误
-                }
-              }
-            });
-          });
-        });
-      }
-
-      quill?.root?.addEventListener('paste', handlePaste);
+  const loadHighlightJs = useCallback(async () => {
+    if (hljsRef.current) return hljsRef.current;
+    try {
+      const module = await import('highlight.js');
+      hljsRef.current = module.default || module;
+      return hljsRef.current;
+    } catch (e) {
+      console.error('加载 highlight.js 失败:', e);
+      return null;
     }
   }, []);
 
+  const highlightCodeBlocks = useCallback(() => {
+    if (!quillInstanceRef.current) return;
+
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+
+    highlightTimerRef.current = setTimeout(async () => {
+      const hljs = await loadHighlightJs();
+      if (!hljs) return;
+
+      const codeBlocks = document.querySelectorAll('.ql-code-block-container');
+      codeBlocks.forEach((block) => {
+        const codeElement = block.querySelector('code');
+        if (codeElement && !codeElement.classList.contains('hljs')) {
+          try {
+            if (typeof hljs.highlightElement === 'function') {
+              hljs.highlightElement(codeElement as HTMLElement);
+            } else if (typeof hljs.highlightBlock === 'function') {
+              hljs.highlightBlock(codeElement as HTMLElement);
+            }
+          } catch (e) {
+            // 忽略高亮错误
+          }
+        }
+      });
+    }, 300);
+  }, [loadHighlightJs]);
+
+  const handleQuillReady = useCallback(() => {
+    if (!quillRef.current || quillInstanceRef.current) return;
+
+    const quill = quillRef.current.getEditor?.() || quillRef.current;
+    if (!quill) return;
+
+    quillInstanceRef.current = quill;
+
+    quill.on('text-change', () => {
+      highlightCodeBlocks();
+      onChangeRef.current?.(quill.root.innerHTML);
+    });
+
+    quill.root.addEventListener('paste', handlePaste);
+  }, [highlightCodeBlocks]);
+
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
-    if (readOnly || !quillInstance) return;
+    if (readOnly || !quillInstanceRef.current) return;
 
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -123,109 +158,126 @@ export default function RichTextEditor({
 
     if (imageFiles.length > 0) {
       e.preventDefault();
-      await uploadPastedImages(imageFiles);
+      uploadImages(imageFiles);
     }
-  }, [readOnly, quillInstance]);
+  }, [readOnly]);
 
-  const uploadPastedImages = async (files: File[]) => {
-    if (!quillInstance || !uploadQueueRef.current) return;
+  const uploadImages = useCallback((files: File[]) => {
+    if (!quillInstanceRef.current || !uploadQueueRef.current) return;
 
-    const range = quillInstance.getSelection();
-    const startIndex = range?.index ?? quillInstance.getLength();
+    const quill = quillInstanceRef.current;
+    const range = quill.getSelection();
+    let insertIndex = range?.index ?? quill.getLength();
 
     files.forEach((file, fileIndex) => {
-      const insertIndex = startIndex + fileIndex;
+      const currentIndex = insertIndex + fileIndex;
       
-      quillInstance.insertEmbed(insertIndex, 'image', 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZWVlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5Ij7kuIrvvIbljJbml6YjmsYTnoJTmsYTor73pgJrnmoTlpI3lj5HpgJrkuK3ljYc8L3RleHQ+PC9zdmc+');
+      quill.insertEmbed(currentIndex, 'image', PLACEHOLDER_IMAGE);
 
-      const pendingImage: PendingImage = {
-        id: `pending-${Date.now()}-${fileIndex}`,
-        index: insertIndex,
-        length: 1,
-      };
-      pendingImagesRef.current.push(pendingImage);
+      const pendingId = `pending-${Date.now()}-${fileIndex}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      pendingImagesRef.current.set(pendingId, {
+        id: pendingId,
+        placeholderIndex: currentIndex,
+      });
 
       uploadQueueRef.current!.addTask({
         file,
         onComplete: (url) => {
-          handleImageUploadComplete(pendingImage.id, url);
+          handleImageUploadComplete(pendingId, url);
         },
         onError: (error) => {
-          handleImageUploadError(pendingImage.id, error);
+          handleImageUploadError(pendingId, error);
         },
       });
     });
-  };
+  }, []);
 
-  const handleImageUploadComplete = (pendingId: string, url: string) => {
-    if (!quillInstance) return;
+  const handleImageUploadComplete = useCallback((pendingId: string, url: string) => {
+    const pending = pendingImagesRef.current.get(pendingId);
+    if (!pending || !quillInstanceRef.current) return;
 
-    const pendingIndex = pendingImagesRef.current.findIndex(p => p.id === pendingId);
-    if (pendingIndex === -1) return;
+    const quill = quillInstanceRef.current;
+    const delta = quill.getContents();
+    let found = false;
+    let ops: any[] = [];
+    let currentIndex = 0;
 
-    const pending = pendingImagesRef.current[pendingIndex];
-    
-    const delta = quillInstance.getContents();
-    let currentOffset = 0;
-    let foundIndex = -1;
-
-    delta.ops?.forEach((op: any, idx: number) => {
-      if (foundIndex !== -1) return;
-      if (op.insert?.image === 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZWVlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5Ij7kuIrvvIbljJbml6YjmsYTnoJTmsYTor73pgJrnmoTlpI3lj5HpgJrkuK3ljYc8L3RleHQ+PC9zdmc+') {
-        if (currentOffset === pending.index) {
-          foundIndex = idx;
+    for (const op of delta.ops || []) {
+      if (!found && op.insert?.image === PLACEHOLDER_IMAGE) {
+        if (currentIndex === pending.placeholderIndex) {
+          ops.push({ insert: { image: url } });
+          found = true;
+          currentIndex += 1;
+          continue;
         }
       }
+      ops.push(op);
       if (op.insert) {
-        currentOffset += typeof op.insert === 'string' ? op.insert.length : 1;
+        currentIndex += typeof op.insert === 'string' ? op.insert.length : 1;
       }
-    });
-
-    if (foundIndex !== -1) {
-      const newDelta = delta.compose(new (quillInstance.constructor as any).Delta()
-        .retain(foundIndex)
-        .delete(1)
-        .insert({ image: url }));
-      
-      quillInstance.setContents(newDelta);
     }
 
-    pendingImagesRef.current.splice(pendingIndex, 1);
-    onChange?.(quillInstance.root.innerHTML);
-  };
+    if (found) {
+      quill.setContents(ops);
+    }
 
-  const handleImageUploadError = (pendingId: string, error: string) => {
+    pendingImagesRef.current.delete(pendingId);
+  }, []);
+
+  const handleImageUploadError = useCallback((pendingId: string, error: string) => {
     message.error(`图片上传失败: ${error}`);
-    const pendingIndex = pendingImagesRef.current.findIndex(p => p.id === pendingId);
-    if (pendingIndex !== -1) {
-      pendingImagesRef.current.splice(pendingIndex, 1);
+    const pending = pendingImagesRef.current.get(pendingId);
+    
+    if (pending && quillInstanceRef.current) {
+      const quill = quillInstanceRef.current;
+      const delta = quill.getContents();
+      let ops: any[] = [];
+      let currentIndex = 0;
+      let found = false;
+
+      for (const op of delta.ops || []) {
+        if (!found && op.insert?.image === PLACEHOLDER_IMAGE) {
+          if (currentIndex === pending.placeholderIndex) {
+            found = true;
+            currentIndex += 1;
+            continue;
+          }
+        }
+        ops.push(op);
+        if (op.insert) {
+          currentIndex += typeof op.insert === 'string' ? op.insert.length : 1;
+        }
+      }
+
+      if (found) {
+        quill.setContents(ops);
+      }
     }
-  };
+
+    pendingImagesRef.current.delete(pendingId);
+  }, []);
 
   const imageHandler = useCallback(function (this: any) {
-    const editor = this.quill;
-    if (!editor) return;
-
     const input = document.createElement('input');
     input.setAttribute('type', 'file');
     input.setAttribute('accept', 'image/*');
     input.setAttribute('multiple', 'multiple');
     input.click();
 
-    input.onchange = async () => {
+    input.onchange = () => {
       const files = input.files;
       if (!files || files.length === 0) return;
-
-      await uploadPastedImages(Array.from(files));
+      uploadImages(Array.from(files));
     };
-  }, []);
+  }, [uploadImages]);
 
   const videoHandler = useCallback(() => {
     setShowVideoModal(true);
   }, []);
 
   const handleVideoInsert = useCallback(() => {
-    if (!videoUrl || !quillInstance) return;
+    if (!videoUrl || !quillInstanceRef.current) return;
 
     if (!isVideoUrlAllowed(videoUrl)) {
       message.error('不支持的视频网站域名');
@@ -238,36 +290,28 @@ export default function RichTextEditor({
       return;
     }
 
-    const range = quillInstance.getSelection();
-    const index = range?.index ?? quillInstance.getLength();
+    const quill = quillInstanceRef.current;
+    const range = quill.getSelection();
+    const index = range?.index ?? quill.getLength();
 
-    const videoHtml = `<iframe 
-      src="${embedUrl}" 
-      width="640" 
-      height="360" 
-      frameborder="0" 
-      class="ql-video-embed"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-      allowfullscreen
-    ></iframe>`;
-
-    quillInstance.insertEmbed(index, 'video', embedUrl);
+    quill.insertEmbed(index, 'video', embedUrl);
     setShowVideoModal(false);
     setVideoUrl('');
-    onChange?.(quillInstance.root.innerHTML);
-  }, [videoUrl, quillInstance, onChange]);
+  }, [videoUrl]);
 
   const tableHandler = useCallback(() => {
-    if (!quillInstance) return;
+    if (!quillInstanceRef.current) return;
+
+    const quill = quillInstanceRef.current;
+    const tableModule = quill.getModule('better-table');
     
-    const tableModule = quillInstance.getModule('better-table');
-    if (tableModule) {
+    if (tableModule && typeof tableModule.insertTable === 'function') {
       tableModule.insertTable(3, 3);
     } else {
-      const range = quillInstance.getSelection();
-      const index = range?.index ?? quillInstance.getLength();
+      const range = quill.getSelection();
+      const index = range?.index ?? quill.getLength();
       
-      let tableHtml = '<table style="border-collapse: collapse; width: 100%; margin: 10px 0;">';
+      let tableHtml = '<table class="ql-better-table" style="border-collapse: collapse; width: 100%; margin: 10px 0;">';
       for (let i = 0; i < 3; i++) {
         tableHtml += '<tr>';
         for (let j = 0; j < 3; j++) {
@@ -276,50 +320,41 @@ export default function RichTextEditor({
         }
         tableHtml += '</tr>';
       }
-      tableHtml += '</table>';
+      tableHtml += '</table><p><br></p>';
 
-      quillInstance.clipboard.dangerouslyPasteHTML(index, tableHtml);
+      quill.clipboard.dangerouslyPasteHTML(index, tableHtml);
     }
-    onChange?.(quillInstance.root.innerHTML);
-  }, [quillInstance, onChange]);
+  }, []);
 
   const codeBlockHandler = useCallback(() => {
     setShowCodeBlockModal(true);
   }, []);
 
-  const handleCodeBlockInsert = useCallback(() => {
-    if (!quillInstance) return;
+  const handleCodeBlockInsert = useCallback(async () => {
+    if (!quillInstanceRef.current) return;
 
-    const range = quillInstance.getSelection();
-    const index = range?.index ?? quillInstance.getLength();
+    const quill = quillInstanceRef.current;
+    const range = quill.getSelection();
+    const index = range?.index ?? quill.getLength();
 
-    quillInstance.format('code-block', true);
-    quillInstance.insertText(index, `// 在此输入 ${EDITOR_CONFIG.CODE_BLOCK_LANGUAGES.find(l => l.value === codeLanguage)?.label} 代码\n`);
+    quill.format('code-block', true);
+    quill.insertText(index, `// 在此输入 ${EDITOR_CONFIG.CODE_BLOCK_LANGUAGES.find(l => l.value === codeLanguage)?.label} 代码\n`);
     
-    const codeBlockContainer = document.querySelector('.ql-code-block-container:last-of-type');
-    if (codeBlockContainer) {
-      codeBlockContainer.setAttribute('data-language', codeLanguage);
-      const codeElement = codeBlockContainer.querySelector('code');
-      if (codeElement) {
-        codeElement.classList.add(`language-${codeLanguage}`);
-        import('highlight.js').then((module) => {
-          const hljs = module.default || module;
-          try {
-            if (typeof hljs.highlightElement === 'function') {
-              hljs.highlightElement(codeElement as HTMLElement);
-            } else if (typeof hljs.highlightBlock === 'function') {
-              hljs.highlightBlock(codeElement as HTMLElement);
-            }
-          } catch (e) {
-            // 忽略高亮错误
-          }
-        });
+    setTimeout(() => {
+      const codeBlocks = document.querySelectorAll('.ql-code-block-container');
+      const lastCodeBlock = codeBlocks[codeBlocks.length - 1];
+      if (lastCodeBlock) {
+        lastCodeBlock.setAttribute('data-language', codeLanguage);
+        const codeElement = lastCodeBlock.querySelector('code');
+        if (codeElement) {
+          codeElement.classList.add(`language-${codeLanguage}`);
+        }
       }
-    }
+      highlightCodeBlocks();
+    }, 50);
 
     setShowCodeBlockModal(false);
-    onChange?.(quillInstance.root.innerHTML);
-  }, [quillInstance, codeLanguage, onChange]);
+  }, [codeLanguage, highlightCodeBlocks]);
 
   const handleToolbarConfigSave = useCallback(() => {
     saveToolbarConfig(toolbarConfig);
@@ -357,8 +392,8 @@ export default function RichTextEditor({
     setToolbarConfig(newConfig);
   }, [toolbarConfig]);
 
-  const modules = useMemo(
-    () => ({
+  const modules = useMemo(() => {
+    const config: any = {
       toolbar: readOnly
         ? false
         : {
@@ -373,9 +408,30 @@ export default function RichTextEditor({
       clipboard: {
         matchVisual: false,
       },
-    }),
-    [imageHandler, videoHandler, tableHandler, codeBlockHandler, readOnly, toolbarConfig]
-  );
+    };
+
+    if (!readOnly && typeof window !== 'undefined') {
+      config['better-table'] = {
+        contextMenu: true,
+        operationMenu: {
+          insertColumnRight: { text: '右侧插入列' },
+          insertColumnLeft: { text: '左侧插入列' },
+          insertRowUp: { text: '上方插入行' },
+          insertRowDown: { text: '下方插入行' },
+          mergeCells: { text: '合并单元格' },
+          unmergeCells: { text: '取消合并' },
+          deleteColumn: { text: '删除列' },
+          deleteRow: { text: '删除行' },
+          deleteTable: { text: '删除表格' },
+        },
+        keyboard: true,
+        tabsize: 4,
+        resizable: true,
+      };
+    }
+
+    return config;
+  }, [imageHandler, videoHandler, tableHandler, codeBlockHandler, readOnly, toolbarConfig]);
 
   const formats = useMemo(
     () => [
@@ -397,6 +453,7 @@ export default function RichTextEditor({
       'table',
       'table-row',
       'table-cell',
+      'better-table',
     ],
     []
   );
@@ -415,6 +472,35 @@ export default function RichTextEditor({
   ];
 
   const editorHeight = height ?? EDITOR_CONFIG.HEIGHT;
+
+  useEffect(() => {
+    if (mounted && typeof window !== 'undefined') {
+      const registerTableModule = async () => {
+        try {
+          const Quill = (await import('quill')).default || (await import('quill'));
+          const QuillBetterTable = (await import('quill-better-table')).default || (await import('quill-better-table'));
+          
+          if (Quill && QuillBetterTable) {
+            Quill.register({
+              'modules/better-table': QuillBetterTable,
+            }, true);
+          }
+        } catch (e) {
+          console.warn('注册 quill-better-table 失败，将使用基础表格功能:', e);
+        }
+      };
+      registerTableModule();
+    }
+  }, [mounted]);
+
+  useEffect(() => {
+    if (mounted && quillRef.current && !quillInstanceRef.current) {
+      const timer = setTimeout(() => {
+        handleQuillReady();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [mounted, handleQuillReady]);
 
   if (!mounted) {
     return (
@@ -445,17 +531,16 @@ export default function RichTextEditor({
         </div>
       )}
 
-      {/* @ts-ignore - react-quill ref type issue */}
       <ReactQuill
         ref={(el: any) => {
           quillRef.current = el;
-          if (el && !quillInstance) {
-            setTimeout(handleQuillReady, 100);
+          if (el && !quillInstanceRef.current) {
+            setTimeout(handleQuillReady, 50);
           }
         }}
         theme="snow"
         value={value}
-        onChange={readOnly ? undefined : onChange}
+        onChange={readOnly ? undefined : () => {}}
         modules={modules}
         formats={formats}
         placeholder={placeholder}
@@ -582,40 +667,83 @@ export default function RichTextEditor({
           line-height: 1.5;
         }
         
-        .article-content table {
+        .article-content table,
+        .ql-editor table {
           border-collapse: collapse;
           width: 100%;
           margin: 16px 0;
         }
         
         .article-content th,
-        .article-content td {
+        .article-content td,
+        .ql-editor th,
+        .ql-editor td {
           border: 1px solid #d9d9d9;
           padding: 8px 12px;
           text-align: left;
         }
         
-        .article-content th {
+        .article-content th,
+        .ql-editor th {
           background: #fafafa;
           font-weight: 600;
         }
         
-        .article-content iframe {
+        .article-content iframe,
+        .ql-editor iframe {
           max-width: 100%;
           aspect-ratio: 16 / 9;
           border: none;
           border-radius: 4px;
         }
         
-        .article-content pre {
+        .article-content pre,
+        .ql-editor pre {
           background: #f6f8fa;
           border-radius: 4px;
           padding: 16px;
           overflow-x: auto;
         }
         
-        .article-content code {
+        .article-content code,
+        .ql-editor code {
           font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        .ql-better-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+
+        .ql-better-table td,
+        .ql-better-table th {
+          border: 1px solid #d9d9d9;
+          padding: 8px;
+          min-width: 50px;
+        }
+
+        .ql-better-table-selected-cell {
+          background-color: #e6f7ff !important;
+        }
+
+        .ql-table-context-menu {
+          position: absolute;
+          background: #fff;
+          border: 1px solid #d9d9d9;
+          border-radius: 4px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+          z-index: 1000;
+          min-width: 120px;
+        }
+
+        .ql-table-context-menu-item {
+          padding: 8px 12px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+
+        .ql-table-context-menu-item:hover {
+          background: #f5f5f5;
         }
       `}</style>
     </div>
