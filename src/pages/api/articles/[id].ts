@@ -6,6 +6,7 @@ import { withAuth, type AuthenticatedRequest } from '@/lib/middleware';
 import { getGlobalDetector } from '@/lib/sensitive-word-detector';
 import { getAllEnabledSensitiveWords } from '@/lib/sensitive-word-storage';
 import type { SensitiveWordDetectionResult } from '@/types/sensitive-word';
+import { getCategoryById } from '@/lib/category-storage';
 
 async function handler(
   req: AuthenticatedRequest,
@@ -66,7 +67,16 @@ async function handler(
         });
       }
 
-      // 2. 敏感词检测
+      // 2. 校验分类是否存在
+      const category = await getCategoryById(validationResult.data.categoryId);
+      if (!category) {
+        return res.status(400).json({
+          success: false,
+          error: '所选分类不存在',
+        });
+      }
+
+      // 3. 敏感词检测
       let detector = getGlobalDetector();
       if (detector.getWords().length === 0) {
         const words = await getAllEnabledSensitiveWords();

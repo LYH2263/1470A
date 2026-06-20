@@ -65,17 +65,16 @@ function CategoriesPage() {
 
   useEffect(() => {
     fetchData();
-  }, [page, pageSize]);
+  }, [page, pageSize, searchKeyword]);
 
   const handleSearch = () => {
     setPage(1);
-    fetchData();
   };
 
   const handleReset = () => {
     setSearchKeyword('');
     setPage(1);
-    setTimeout(fetchData, 0);
+    setSelectedRowKeys([]);
   };
 
   const handleCreate = () => {

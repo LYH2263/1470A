@@ -1,8 +1,8 @@
-import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Button, Tooltip } from 'antd';
+import { Form, Input, Select, DatePicker, message, Modal, Tag, Alert, Button, Tooltip, Space } from 'antd';
 import { useRouter } from 'next/router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
-import { WarningOutlined, CheckCircleOutlined, AimOutlined } from '@ant-design/icons';
+import { WarningOutlined, CheckCircleOutlined, AimOutlined, AppstoreOutlined } from '@ant-design/icons';
 import RichTextEditor, { type RichTextEditorApi } from '@/components/common/RichTextEditor';
 import type { Article, ArticleFormData, UpdateArticleWithOptimisticLock } from '@/types/article';
 import { fetchWithAuth } from '@/lib/api';
@@ -569,14 +569,37 @@ export default function ArticleForm({ initialValues, mode, formId, readOnly = fa
         name="categoryId"
         rules={[{ required: true, message: '请选择分类' }]}
       >
-        <Select
-          loading={categoriesLoading}
-          placeholder="请选择分类"
-          options={categories.map((cat) => ({
-            value: cat.id,
-            label: cat.name,
-          }))}
-        />
+        {categories.length === 0 && !categoriesLoading ? (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<AppstoreOutlined />}
+            message="暂无可用分类"
+            description={
+              <Space direction="vertical" size="small">
+                <span>请先创建分类后再发布文章</span>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<AppstoreOutlined />}
+                  onClick={() => router.push('/categories')}
+                >
+                  前往分类管理
+                </Button>
+              </Space>
+            }
+            style={{ marginBottom: 0 }}
+          />
+        ) : (
+          <Select
+            loading={categoriesLoading}
+            placeholder="请选择分类"
+            options={categories.map((cat) => ({
+              value: cat.id,
+              label: cat.name,
+            }))}
+          />
+        )}
       </Form.Item>
 
       <Form.Item

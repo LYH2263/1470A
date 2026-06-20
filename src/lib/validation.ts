@@ -28,9 +28,7 @@ export const ArticleSchema = z.object({
   }),
   categoryId: z
     .string()
-    .uuid('分类格式不正确')
-    .optional()
-    .nullable(),
+    .uuid('分类格式不正确'),
 });
 
 export type ArticleInput = z.infer<typeof ArticleSchema>;
